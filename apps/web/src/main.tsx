@@ -331,12 +331,7 @@ function App() {
       <header className="topbar">
         <Lobby />
         <a className="brand" href="/" aria-label="react-polytop home">
-          <span className="brand-mark">
-            <Icon name="compass" />
-          </span>
-          <span>
-            react-polytop
-          </span>
+          <span>react-polytop</span>
         </a>
         <div className="chapter">
           <span className="live-dot" /> LOCAL EXPEDITION{" "}
