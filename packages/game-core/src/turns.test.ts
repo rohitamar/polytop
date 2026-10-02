@@ -144,6 +144,7 @@ describe("player turns", () => {
       state.players = Array.from({ length: count }, (_, i) => ({
         id: `player-${i + 1}`,
         name: `Player ${i + 1}`,
+        stars: 0,
       }));
       for (let i = 0; i < count * 3; i++) {
         expect(state.activePlayerId).toBe(state.players[i % count].id);

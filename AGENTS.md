@@ -11,7 +11,7 @@
 - Only incoming-player units refill to maxMovement. Inactive units may retain unspent movement but cannot act or produce legal movement highlights.
 - Selection uses unit IDs. Clear it on turn handoff; block movement, resets, selection changes and End Turn during animation. Presentation colors stay outside game-core.
 - New gameplay rules need unit tests. Use debug snapshots to assert canvas game state in Playwright; exercise real pointer interactions.
-- Keep dependencies minimal. This milestone excludes multiplayer, cities, economy, progression, accounts, persistence and fog of war.
+- Keep dependencies minimal. This milestone excludes multiplayer, recruitment, technology, progression, accounts, persistence and fog of war.
 - Debug tools are development-only; production behavior must never depend on them.
 - The default map is 20×20. Derive rendering offsets, island dimensions, camera framing and UI size labels from state.width/state.height rather than hardcoding a board size.
 

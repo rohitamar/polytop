@@ -18,8 +18,8 @@ function fixture(): GameState {
     revision: 0,
     activePlayerId: "p1",
     players: [
-      { id: "p1", name: "One" },
-      { id: "p2", name: "Two" },
+      { id: "p1", name: "One", stars: 0 },
+      { id: "p2", name: "Two", stars: 0 },
     ],
     turnNumber: 1,
     tiles: Array.from({ length: 25 }, (_, i) => ({
@@ -27,6 +27,7 @@ function fixture(): GameState {
       y: Math.floor(i / 5),
       terrain: "grass",
     })),
+    cities: [],
     units: [
       {
         ...warriorStats,

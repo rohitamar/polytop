@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   applyAction,
+  getIncome,
+  cityEconomy,
+  getUpgradeCost,
   getAttackTargets,
   previewCombat,
   createGame,
@@ -49,8 +52,10 @@ function App() {
   const world = useRef<World | null>(null);
   const stateRef = useRef(createGame());
   const selection = useRef<string | null>(null);
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const busy = useRef(false);
   const [state, setState] = useState<GameState>(stateRef.current);
+  const city = state.cities.find((city) => city.id === selectedCityId);
   const [selected, setSelected] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const targetRef = useRef<string | null>(null);
@@ -102,6 +107,7 @@ function App() {
     )
       return;
     clearTarget();
+    setSelectedCityId(null);
     selection.current = value;
     setBlockedOwner(null);
     setSelected(value);
@@ -170,6 +176,9 @@ function App() {
     const click = async (position: Position) => {
       if (busy.current) return;
       const current = stateRef.current;
+      const clickedCity = current.cities.find(
+        (city) => city.x === position.x && city.y === position.y,
+      );
       const clickedUnit = current.units.find(
         (unit) => unit.x === position.x && unit.y === position.y,
       );
@@ -187,6 +196,7 @@ function App() {
             return;
           }
           select(null);
+          setSelectedCityId(clickedCity?.id ?? null);
           const owner = current.players.find(
             (player) => player.id === clickedUnit.ownerId,
           )!;
@@ -195,6 +205,7 @@ function App() {
           return;
         }
         select(clickedUnit.id);
+        setSelectedCityId(clickedCity?.id ?? null);
         setNotice(
           clickedUnit.movement
             ? "Choose a highlighted tile to move."
@@ -206,11 +217,19 @@ function App() {
       const warrior = current.units.find(
         (unit) => unit.id === selection.current,
       );
-      if (!warrior) return;
+      if (!warrior) {
+        setSelectedCityId(clickedCity?.id ?? null);
+        return;
+      }
       const destination = getReachableTiles(current, warrior.id).find(
         (tile) => tile.x === position.x && tile.y === position.y,
       );
       if (!destination) {
+        if (clickedCity) {
+          select(null);
+          setSelectedCityId(clickedCity.id);
+          return;
+        }
         setNotice("Beyond your reach. Choose a highlighted tile.");
         return;
       }
@@ -231,6 +250,7 @@ function App() {
       busy.current = false;
       setMoving(false);
       world.current!.update(next, warrior.id);
+      setSelectedCityId(clickedCity?.id ?? null);
       setNotice(
         next.units.find((unit) => unit.id === warrior.id)!.movement
           ? "New ground, new possibilities. One step remains."
@@ -370,6 +390,64 @@ function App() {
         </div>
         <div className="card-rule" />
         <div className="stat-row">
+          <span>Stars</span>
+          <b data-testid="stars">{activePlayer.stars}</b>
+        </div>
+        <div className="stat-row">
+          <span>Income per turn</span>
+          <b data-testid="income">+{getIncome(state, activePlayer.id)}</b>
+        </div>
+        {city && (
+          <div className="city-info" aria-label="Selected city">
+            <div className="card-rule" />
+            <div className="eyebrow">
+              CITY &middot;{" "}
+              {state.players.find((player) => player.id === city.ownerId)
+                ?.name ?? "Neutral"}
+            </div>
+            <div className="stat-row">
+              <span>Level</span>
+              <b>
+                {city.level} / {cityEconomy.maxLevel}
+              </b>
+            </div>
+            <div className="stat-row">
+              <span>City income</span>
+              <b>+{city.income} stars</b>
+            </div>
+            {getUpgradeCost(city) !== null ? (
+              <div className="stat-row">
+                <span>Upgrade cost</span>
+                <b>{getUpgradeCost(city)} stars</b>
+              </div>
+            ) : (
+              <p>Maximum level</p>
+            )}
+            {city.ownerId === activePlayer.id &&
+              getUpgradeCost(city) !== null && (
+                <button
+                  disabled={
+                    moving || activePlayer.stars < getUpgradeCost(city)!
+                  }
+                  onClick={() => {
+                    if (busy.current) return;
+                    const next = applyAction(stateRef.current, {
+                      type: "UPGRADE_CITY",
+                      playerId: stateRef.current.activePlayerId,
+                      cityId: city.id,
+                    });
+                    stateRef.current = next;
+                    setState(next);
+                    world.current?.update(next, selection.current);
+                    setNotice("City upgraded. More income arrives next turn.");
+                  }}
+                >
+                  Upgrade City
+                </button>
+              )}
+          </div>
+        )}
+        <div className="stat-row">
           <span>Warriors</span>
           <b>{activeUnits.length}</b>
         </div>
@@ -388,7 +466,7 @@ function App() {
           />
         </div>
       </aside>
-      <div className="map-tools">
+      <div className={`map-tools ${city ? "city-open" : ""}`}>
         <span className="north">
           N<Icon name="compass" />
         </span>
@@ -569,6 +647,11 @@ function App() {
             confirm Attack. Moving first is allowed; attacking ends that
             warrior's actions. Injured warriors deal less damage. Surviving
             defenders retaliate.
+          </p>
+          <p>
+            Enter a city to claim it. Click a city to inspect or upgrade it.
+            Owned cities pay stars at the start of your turn; upgrades increase
+            future income.
           </p>
           <ul>
             <li>Grass costs 1 point.</li>
