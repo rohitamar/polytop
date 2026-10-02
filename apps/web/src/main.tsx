@@ -60,7 +60,7 @@ function App() {
   if (import.meta.env.DEV) renders.current++;
   const canvas = useRef<HTMLCanvasElement>(null);
   const world = useRef<World | null>(null);
-  const [state, setState] = useState<GameState>(() => createGame());
+  const [state, setState] = useState<GameState>(() => createGame("fern-104", 2, { scenario: "demo" }));
   const stateRef = useRef(state);
   const network = useRef<{ playerId: string; send: (message: LobbyClientMessage) => Promise<void> } | null>(null);
   const networkMatch = useRef(false);
@@ -185,7 +185,7 @@ function App() {
   };
   const reset = (seed = stateRef.current.seed) => {
     if (busy.current || networkMatch.current) return;
-    stateRef.current = createGame(seed);
+    stateRef.current = createGame(seed, 2, { scenario: "demo" });
     setState(stateRef.current);
     select(null);
     world.current?.rebuild(stateRef.current);
@@ -378,6 +378,14 @@ function App() {
             ),
           getTurnNumber: () => stateRef.current.turnNumber,
           getTile: (x, y) => structuredClone(getTile(stateRef.current, x, y)),
+          setWorld: (seed, playerCount, dimensions) => {
+            if (busy.current || networkMatch.current) throw new Error("Cannot replace an active match");
+            stateRef.current = createGame(seed, playerCount, dimensions);
+            setState(stateRef.current);
+            select(null);
+            world.current?.rebuild(stateRef.current);
+            world.current?.update(stateRef.current, null);
+          },
           setSeed: (seed) => {
             if (busy.current) throw new Error("Wait for movement to finish");
             reset(seed);

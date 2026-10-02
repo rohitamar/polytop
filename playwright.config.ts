@@ -22,7 +22,7 @@ export default defineConfig({
     timeout: 60000,
   }, {
     command: "npm run start -w @reach/server",
-    env: { PORT: serverPort },
+    env: { PORT: serverPort, MATCH_SEED: "fern-104", MATCH_SCENARIO: "demo" },
     url: `http://127.0.0.1:${serverPort}`,
     reuseExistingServer: !process.env.CI,
     timeout: 60000,

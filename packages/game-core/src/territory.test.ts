@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyAction, createGame, getTerritory, getTileTerritory, territoryRules } from "./index";
+import { applyAction, createGame as generateGame, getTerritory, getTileTerritory, territoryRules } from "./index";
+
+const createGame = (seed = "fern-104", count = 2) => generateGame(seed, count, count === 2 ? { scenario: "demo" } : {});
 
 describe("city territory", () => {
   it("claims its own tile and a compact Manhattan region, leaving distant tiles unclaimed", () => {
@@ -42,6 +44,15 @@ describe("city territory", () => {
     const next = applyAction(state, { type: "ATTACK_UNIT", playerId: "player-1", unitId: "warrior-1", targetId: "warrior-2" });
     expect(getTerritory(next).filter(tile => tile.cityId === "city-2")).toEqual(before.map(tile => ({ ...tile, playerId: "player-1" })));
     expect(getTerritory(state).filter(tile => tile.cityId === "city-2")).toEqual(before);
+  });
+  it("keeps individual city claims for adjoining friendly and opposing regions", () => {
+    const state = generateGame("territory", 2, { width: 12, height: 16 });
+    state.cities = [{ ...state.cities[0], x: 4, y: 5 }, { ...state.cities[1], x: 7, y: 5, ownerId: state.players[0].id }];
+    expect(getTileTerritory(state, 5, 5)).toMatchObject({ cityId: "city-1", playerId: "player-1" });
+    expect(getTileTerritory(state, 6, 5)).toMatchObject({ cityId: "city-2", playerId: "player-1" });
+    state.cities[1].ownerId = state.players[1].id;
+    expect(getTileTerritory(state, 6, 5)).toMatchObject({ cityId: "city-2", playerId: "player-2" });
+    expect(getTileTerritory(state, 0, 0)).toMatchObject({ cityId: null, playerId: null });
   });
   it("clips claims to map tiles and keeps territory stable through upgrades", () => {
     const state = createGame();

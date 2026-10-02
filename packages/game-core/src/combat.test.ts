@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAction,
-  createGame,
+  createGame as generateGame,
   getAttackTargets,
   getReachableTiles,
   getTile,
@@ -30,6 +30,8 @@ function freeze<T>(value: T): T {
 }
 const end = (state: GameState) =>
   applyAction(state, { type: "END_TURN", playerId: state.activePlayerId });
+
+const createGame = (seed = "fern-104", count = 2) => generateGame(seed, count, count === 2 ? { scenario: "demo" } : {});
 
 describe("warrior combat", () => {
   it("stores the warrior stats in the rules state", () => {

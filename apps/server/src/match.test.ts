@@ -12,7 +12,7 @@ describe("lobby WebSocket server", () => {
   let server: ReturnType<typeof createLobbyServer>;
   let port: number;
   beforeEach(async () => {
-    server = createLobbyServer();
+    server = createLobbyServer({ seed: "fern-104", demo: true });
     port = await server.listen(0);
   });
   afterEach(async () => {
@@ -91,6 +91,22 @@ describe("lobby WebSocket server", () => {
     return next;
   }
 
+
+  it("chooses independent seeds per room and broadcasts one world to every client", async () => {
+    await server.close();
+    server = createLobbyServer();
+    port = await server.listen(0);
+    const first = await match(8);
+    const second = await match(2);
+    expect(first.state.seed).not.toBe(second.state.seed);
+    expect(first.state.tiles).not.toEqual(second.state.tiles);
+    expect(first.state.width).toBe(30);
+    expect(second.state.width).toBe(20);
+    const next = await act(first.clients, first.state, { type: "END_TURN" });
+    expect(getTerritory(next)).toEqual(getTerritory(first.state));
+    expect((await act(second.clients, second.state, { type: "END_TURN" })).revision).toBe(1);
+  });
+
   it("requires a host and two players to start", async () => {
     const { host, room } = await create();
     host.send({ type: "START_MATCH" });
@@ -102,8 +118,14 @@ describe("lobby WebSocket server", () => {
     expect((await guest.next()).type).toBe("LOBBY_ERROR");
   });
 
-  it.each([2, 8])("starts identical canonical state for %i players", async count => {
+  it.each([2, 4, 6, 8])("starts identical canonical state for %i players", async count => {
+    await server.close();
+    server = createLobbyServer({ seed: "fern-104" });
+    port = await server.listen(0);
     const { state, clients } = await match(count);
+    const size = count === 2 ? 20 : count === 4 ? 24 : count === 6 ? 28 : 30;
+    expect(state).toMatchObject({ width: size, height: size });
+    expect(state.tiles).toHaveLength(size * size);
     expect(state.players).toHaveLength(count);
     expect(state.units).toHaveLength(count);
     clients[0].send({ type: "START_MATCH" });

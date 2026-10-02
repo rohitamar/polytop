@@ -31,6 +31,7 @@ import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import "@babylonjs/core/Culling/ray";
 import {
   getTerritory,
+  getTile,
   getReachableTiles,
   getAttackTargets,
   type CombatPreview,
@@ -207,7 +208,7 @@ export function createWorld(
   const tilePoint = (p: Position) =>
     new Vector3(
       p.x - (currentState.width - 1) / 2,
-      tileHeight(currentState?.tiles.find((t) => t.x === p.x && t.y === p.y)),
+      tileHeight(getTile(currentState, p.x, p.y)),
       p.y - (currentState.height - 1) / 2,
     );
   const solid = (
@@ -415,8 +416,10 @@ export function createWorld(
     defaultZoom = Math.max(state.width, state.height) * 0.81;
     zoom = defaultZoom;
     camera.radius = Math.max(state.width, state.height) * 2.2;
+    camera.maxZ = Math.max(state.width, state.height) * 5;
     resize();
     buildingTerrain = true;
+    const ripples: Mesh[] = [];
     for (const tile of state.tiles) {
       const point = tilePoint(tile);
       const terrain = box(
@@ -468,6 +471,7 @@ export function createWorld(
       if (tile.terrain === "water") {
         for (let i = 0; i < 2; i++) {
           const ripple = box("ripple", 0.18 + i * 0.12, 0.007, 0.018, foam);
+          ripples.push(ripple as Mesh);
           ripple.position.set(
             point.x - 0.1 + i * 0.23,
             point.y + 0.01,
@@ -475,6 +479,16 @@ export function createWorld(
           );
         }
       }
+    }
+    if (ripples.length) {
+      const rippleSet = new Set<AbstractMesh>(ripples);
+      for (const ripple of ripples) shadows.removeShadowCaster(ripple);
+      const merged = Mesh.MergeMeshes(ripples, true, true);
+      if (!merged) throw new Error("Could not batch water ripples");
+      merged.name = "water ripples";
+      merged.alphaIndex = 0;
+      solid(merged, foam);
+      decorations = decorations.filter(mesh => !rippleSet.has(mesh));
     }
     buildingTerrain = false;
     for (const mesh of decorations) mesh.freezeWorldMatrix();
@@ -491,14 +505,17 @@ export function createWorld(
       );
     hover.setEnabled(false);
     hoveredKey = "";
+    onHover(null);
   };
   let selectedCity: string | null = null;
   let territorySignature = "";
+  let territoryBuilds = 0;
   let territoryMeshes: Mesh[] = [];
   const updateTerritory = (state: GameState, cityId: string | null) => {
     const signature = JSON.stringify([state.width, state.height, state.tiles, state.cities.map(city => [city.id, city.x, city.y, city.ownerId]), cityId]);
     if (signature === territorySignature) return;
     territorySignature = signature;
+    if (import.meta.env.DEV) territoryBuilds++;
     territoryMeshes.forEach(mesh => mesh.dispose());
     territoryMeshes = [];
     const claims = getTerritory(state);
@@ -771,7 +788,7 @@ export function createWorld(
   });
   return {
     selectCity,
-    getTerritoryRenderStats: () => ({ meshes: territoryMeshes.length, quads: territoryMeshes.reduce((sum, mesh) => sum + mesh.getTotalVertices() / 4, 0), selectedCityId: selectedCity }),
+    getTerritoryRenderStats: () => ({ builds: territoryBuilds, meshes: territoryMeshes.length, quads: territoryMeshes.reduce((sum, mesh) => sum + mesh.getTotalVertices() / 4, 0), selectedCityId: selectedCity }),
     getProfile: () => ({ ...profile, meshes: scene.meshes.length, materials: scene.materials.length, loops: engine.activeRenderLoops.length }),
     resetProfile: () => { profile.frames.length = 0; profile.picks.length = 0; },
     rebuild,

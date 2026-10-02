@@ -14,7 +14,7 @@ import {
 type Member = { socket: WebSocket; player: LobbyPlayer };
 type Room = { code: string; members: Member[]; state?: GameState };
 
-export function createLobbyServer() {
+export function createLobbyServer(options: { seed?: string; demo?: boolean } = {}) {
   const rooms = new Map<string, Room>();
   const memberships = new Map<WebSocket, Room>();
   const http = createServer((_request, response) => {
@@ -99,7 +99,7 @@ export function createLobbyServer() {
             if (room.members[0] !== member) throw new Error("Only the host can start the match");
             if (room.state) throw new Error("Match already started");
             if (room.members.length < 2) throw new Error("At least two players are required");
-            const initial = createGame("fern-104", room.members.length);
+            const initial = createGame(options.seed ?? randomUUID(), room.members.length, options.demo && room.members.length === 2 ? { scenario: "demo" } : {});
             const ids = new Map(initial.players.map((player, i) => [player.id, room.members[i].player.id]));
             room.state = { ...initial, activePlayerId: member.player.id,
               players: initial.players.map((player, i) => ({ ...player, id: room.members[i].player.id, name: room.members[i].player.name })),

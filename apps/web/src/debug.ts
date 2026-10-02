@@ -11,7 +11,7 @@ import type {
 export interface GameDebug {
   getProfile(): { frames: { cpu: number; interval: number; draws: number; active: number }[]; picks: number[]; builds: number; updates: number; meshes: number; materials: number; loops: number; reactRenders: number };
   resetProfile(): void;
-  getTerritoryRenderStats(): { meshes: number; quads: number; selectedCityId: string | null };
+  getTerritoryRenderStats(): { builds: number; meshes: number; quads: number; selectedCityId: string | null };
   getTerritory(): TileTerritory[];
   getTileTerritory(x: number, y: number): TileTerritory | undefined;
   getState(): GameState;
@@ -20,6 +20,7 @@ export interface GameDebug {
   getTurnNumber(): number;
   getTile(x: number, y: number): Tile | undefined;
   setSeed(seed: string): void;
+  setWorld(seed: string, playerCount: number, dimensions?: { width: number; height: number }): void;
   getReachableTiles(unitId?: string): ReachableTile[];
   getSelectedUnitId(): string | null;
   getTileScreenPosition(x: number, y: number): Position;

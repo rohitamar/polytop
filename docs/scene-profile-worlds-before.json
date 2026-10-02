@@ -1,0 +1,176 @@
+{
+  "gpu": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "seed": "fern-104",
+  "worlds": [
+    {
+      "players": 2,
+      "width": 20,
+      "height": 20,
+      "buildMs": 30.800000000745058,
+      "samples": {
+        "idle": {
+          "meshes": 1565,
+          "materials": 41,
+          "draws": {
+            "mean": 197,
+            "p95": 197
+          },
+          "cpuMs": {
+            "mean": 2.4941176469985615,
+            "p95": 2.699999999254942
+          },
+          "intervalMs": {
+            "mean": 37.12573529410121,
+            "p95": 38.400000002235174
+          },
+          "pickMs": null,
+          "frames": 136,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 3
+        },
+        "hover": {
+          "meshes": 1565,
+          "materials": 41,
+          "draws": {
+            "mean": 197.990099009901,
+            "p95": 198
+          },
+          "cpuMs": {
+            "mean": 2.4643564355919265,
+            "p95": 2.699999999254942
+          },
+          "intervalMs": {
+            "mean": 39.033663366358766,
+            "p95": 41.5
+          },
+          "pickMs": {
+            "mean": 0.4430000001564622,
+            "p95": 0.6000000014901161
+          },
+          "frames": 101,
+          "loops": 1,
+          "reactRenders": 40,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 3
+        },
+        "selected": {
+          "meshes": 1590,
+          "materials": 41,
+          "draws": {
+            "mean": 224,
+            "p95": 224
+          },
+          "cpuMs": {
+            "mean": 2.63828124984866,
+            "p95": 3
+          },
+          "intervalMs": {
+            "mean": 39.25234374997672,
+            "p95": 40.399999998509884
+          },
+          "pickMs": null,
+          "frames": 128,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 4
+        }
+      }
+    },
+    {
+      "players": 8,
+      "width": 30,
+      "height": 30,
+      "buildMs": 43,
+      "samples": {
+        "idle": {
+          "meshes": 3318,
+          "materials": 49,
+          "draws": {
+            "mean": 525,
+            "p95": 525
+          },
+          "cpuMs": {
+            "mean": 4.914736842364073,
+            "p95": 5.199999999254942
+          },
+          "intervalMs": {
+            "mean": 52.912631578939525,
+            "p95": 55.19999999925494
+          },
+          "pickMs": null,
+          "frames": 95,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 9
+        },
+        "hover": {
+          "meshes": 3318,
+          "materials": 49,
+          "draws": {
+            "mean": 525.990099009901,
+            "p95": 526
+          },
+          "cpuMs": {
+            "mean": 4.463366336567272,
+            "p95": 4.800000000745058
+          },
+          "intervalMs": {
+            "mean": 55.84554455444069,
+            "p95": 59
+          },
+          "pickMs": {
+            "mean": 0.8540000000223518,
+            "p95": 1.0999999977648258
+          },
+          "frames": 101,
+          "loops": 1,
+          "reactRenders": 60,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 9
+        },
+        "selected": {
+          "meshes": 3343,
+          "materials": 49,
+          "draws": {
+            "mean": 552,
+            "p95": 552
+          },
+          "cpuMs": {
+            "mean": 4.983695651971452,
+            "p95": 5.199999999254942
+          },
+          "intervalMs": {
+            "mean": 54.57934782609505,
+            "p95": 56.5
+          },
+          "pickMs": null,
+          "frames": 92,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 10
+        }
+      }
+    }
+  ]
+}

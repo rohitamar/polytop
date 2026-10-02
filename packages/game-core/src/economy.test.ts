@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyAction, createGame, economy, getCityPopulation, getProduction, getWorkableTiles, positionKey, type GameAction, type GameState, type Opportunity } from "./index";
+import { applyAction, createGame as generateGame, economy, getCityPopulation, getProduction, getWorkableTiles, positionKey, type GameAction, type GameState, type Opportunity } from "./index";
 
 const end = (state: GameState) => applyAction(state, { type: "END_TURN", playerId: state.activePlayerId });
 const cycle = (state: GameState) => end(end(state));
@@ -13,6 +13,8 @@ const invariant = (state: GameState) => {
     expect(population.total).toBeLessThanOrEqual(population.cap);
   }
 };
+
+const createGame = (seed = "fern-104", count = 2) => generateGame(seed, count, count === 2 ? { scenario: "demo" } : {});
 
 describe("population economy", () => {
   it.each([1, 2, 3])("level %i defines cap and turn Gold", level => {

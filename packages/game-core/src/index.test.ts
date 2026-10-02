@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyAction,
   warriorStats,
-  createGame,
+  createGame as generateGame,
   getReachableTiles,
   getTile,
   type GameAction,
@@ -53,6 +53,8 @@ const action = (
   unitId: "u1",
   to: { x, y },
 });
+
+const createGame = (seed = "fern-104", count = 2) => generateGame(seed, count, count === 2 ? { scenario: "demo" } : {});
 
 describe("seeded world", () => {
   it("reproduces the same complete state from a seed", () => {

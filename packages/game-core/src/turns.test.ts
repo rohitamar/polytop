@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyAction,
   warriorStats,
-  createGame,
+  createGame as generateGame,
   getReachableTiles,
   getTile,
   type GameAction,
@@ -25,6 +25,8 @@ const move = (
   x = 5,
   y = 5,
 ): GameAction => ({ type: "move", playerId, unitId, to: { x, y } });
+
+const createGame = (seed = "fern-104", count = 2) => generateGame(seed, count, count === 2 ? { scenario: "demo" } : {});
 
 describe("player turns", () => {
   it("initializes two distinct owners, turn one, and only the first player's movement", () => {

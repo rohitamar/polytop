@@ -39,3 +39,22 @@ Picking averages 0.45 ms, p95 0.60 ms across 100 hover moves. Idle, selected, an
 Integration testing exposed a timing-sensitive input issue: Babylon's camera subscribes to double taps, so a rapid second click can be classified as a double tap instead of the single tap the old gameplay handler accepted. Diagnostic pointer logs confirmed the reclassification during select-then-move and select-then-attack. The centralized observer now handles pointer down/move/up, accepting left-button releases only when the pointer has not exceeded the existing 10px drag threshold. Hover and clicks share the same pickable/visible/enabled predicate, preserving the original explicit-pick eligibility while reusing event pick results. Right-drag orbiting remains intact. The final measurements above include this fix. All 101 unit tests, all six browser regressions in one complete run, typechecking, and the production build pass. The existing production bundle-size warning remains.
 
 Repeat with `node scripts/profile-scene.mjs economy`. It also captures `profile-economy-upgradedCity.png`. The benchmark always closes its browser, including on failure.
+
+## Scalable worlds and territory
+
+The new deterministic `fern-104` strategic worlds were measured sequentially in one Chromium process with SwiftShader at 1440×1000. Each board receives a five-second warmup, five-second idle and selected-city samples, and 100 real hover moves. `scene-profile-worlds-before.json` records the initial implementation; `scene-profile-worlds.json` records the final water-ripple batching. Run `PLAYWRIGHT_BASE_URL=http://127.0.0.1:5191 node scripts/profile-worlds.mjs` with a web preview running, without concurrent browser tests.
+
+| Scenario | Draws/frame | CPU render mean (ms) | Frame interval mean / p95 (ms) | Effective FPS |
+| --- | ---: | ---: | ---: | ---: |
+| 20×20, two players, idle | 86 | 2.13 | 36.24 / 37.60 | 27.60 |
+| 20×20, selected city and unit | 113 | 2.32 | 37.94 / 39.40 | 26.36 |
+| 30×30, eight players, idle | 206 | 3.85 | 50.08 / 52.30 | 19.97 |
+| 30×30, selected city and unit | 233 | 3.90 | 51.39 / 53.20 | 19.46 |
+
+The initial 30×30 scene submitted 525 idle draws with 4.91 ms CPU and 52.91 ms frame intervals. Hundreds of transparent water-ripple boxes were the largest avoidable draw-call source. They now merge into one static, non-pickable mesh using their existing material and exact box geometry. This lowers idle draws to 206 (61% reduction) and CPU to 3.85 ms (22% reduction). Alpha ordering draws these disjoint water details before other transparent overlays. Existing terrain instances, frozen matrices, cached shadows, shadow quality, and the single render loop remain intact. Tile lookup and height calculation use a row-major fast path while retaining support for reordered tile arrays.
+
+The larger board remains slower than the new 20×20 board on this software renderer: 900 tiles and eight units require more geometry submission and rasterization. GPU hardware FPS was not measured. The optimized 30×30 board still submits fewer draws than the previous 20×20 economy scene. Initial generation plus scene rebuild measured 32.6 ms for 20×20 and 47.1 ms for 30×30; these are warm browser measurements, not network/load time guarantees.
+
+Eight-player hover picking averaged 0.79 ms (p95 0.90 ms). Every settled sample had zero world rebuilds, world updates and territory rebuilds, with exactly one render loop. Idle and selected samples had zero React renders; the hover sweep updated the terrain label 60 times without updating the world. Territory uses nine batches for eight owners plus neutral claims, and ten with selected-city tint. Material counts are 41 for two players and 49 for eight; the increase comes from existing unit HP materials/textures and does not scale per tile.
+
+Browser regressions exercise actual pointer moves, city selection on 30×30 and rectangular boards, and capture in an eight-client authoritative match. The eight-client test uses two rendered browser contexts and six real WebSocket participants to check exact terrain/state/territory agreement without competing eight software GPU scenes.

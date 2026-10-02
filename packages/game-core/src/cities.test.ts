@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAction,
-  createGame,
+  createGame as generateGame,
   getIncome,
   getUpgradeCost,
   type GameState,
@@ -21,6 +21,8 @@ const move = (state: GameState, x = 5, y = 5) =>
     unitId: "warrior-1",
     to: { x, y },
   });
+
+const createGame = (seed = "fern-104", count = 2) => generateGame(seed, count, count === 2 ? { scenario: "demo" } : {});
 
 describe("cities and economy", () => {
   it.each([2, 3, 8])(

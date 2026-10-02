@@ -1,3 +1,5 @@
+import { generateWorld, type WorldConfig } from "./world";
+export { getMapSize, mapSizes, terrainRules, type WorldConfig } from "./world";
 export type Terrain = "grass" | "forest" | "mountain" | "water";
 export type Position = { x: number; y: number };
 export type Resource = "gold" | "food" | "wood" | "steel";
@@ -126,34 +128,14 @@ export const movementCost: Record<Terrain, number> = {
   water: Infinity,
 };
 export const positionKey = ({ x, y }: Position) => `${x},${y}`;
-export const getTile = (state: GameState, x: number, y: number) =>
-  state.tiles.find((tile) => tile.x === x && tile.y === y);
+export const getTile = (state: GameState, x: number, y: number) => {
+  const indexed = state.tiles[y * state.width + x];
+  return indexed?.x === x && indexed.y === y ? indexed : state.tiles.find(tile => tile.x === x && tile.y === y);
+};
 
-function randomFromSeed(seed: string) {
-  let value = 2166136261;
-  for (const char of seed)
-    value = Math.imul(value ^ char.charCodeAt(0), 16777619);
-  return () => {
-    value += 0x6d2b79f5;
-    let n = Math.imul(value ^ (value >>> 15), 1 | value);
-    n ^= n + Math.imul(n ^ (n >>> 7), 61 | n);
-    return ((n ^ (n >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-export function createGame(seed = "fern-104", playerCount = 2): GameState {
-  if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > 8)
-    throw new Error("Expected 2-8 players");
-  const starts = [
-    { x: 4, y: 5 },
-    { x: 7, y: 3 },
-    { x: 14, y: 3 },
-    { x: 16, y: 7 },
-    { x: 15, y: 14 },
-    { x: 10, y: 16 },
-    { x: 4, y: 15 },
-    { x: 3, y: 10 },
-  ].slice(0, playerCount);
+export function createGame(seed = "fern-104", playerCount = 2, config: WorldConfig = {}): GameState {
+  const world = generateWorld(seed, playerCount, config);
+  const { starts, villages, tiles } = world;
   const cities: City[] = [
     ...starts.map((position, i) => ({
       ...position,
@@ -163,12 +145,7 @@ export function createGame(seed = "fern-104", playerCount = 2): GameState {
       population: economy.startingPopulation,
       workedTiles: [],
     })),
-    ...[
-      { x: 5, y: 5 },
-      { x: 10, y: 7 },
-      { x: 12, y: 12 },
-      { x: 7, y: 11 },
-    ].map((position, i) => ({
+    ...villages.map((position, i) => ({
       ...position,
       id: `neutral-${i + 1}`,
       ownerId: null,
@@ -177,41 +154,14 @@ export function createGame(seed = "fern-104", playerCount = 2): GameState {
       workedTiles: [],
     })),
   ];
-  const width = 20;
-  const height = 20;
-  const random = randomFromSeed(seed);
-  const tiles: Tile[] = [];
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const roll = random();
-      const edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
-      let terrain: Terrain =
-        edge && roll < 0.76
-          ? "water"
-          : roll < 0.16
-            ? "water"
-            : roll < 0.31
-              ? "mountain"
-              : roll < 0.57
-                ? "forest"
-                : "grass";
-      if (Math.abs(x - 4) + Math.abs(y - 5) <= 2) terrain = "grass";
-      if (x === 4 && y === 4) terrain = "forest";
-      if (Math.abs(x - 7) + Math.abs(y - 3) <= 1) terrain = "grass";
-      if (
-        starts
-          .slice(2)
-          .some((p) => Math.abs(p.x - x) + Math.abs(p.y - y) <= 1) ||
-        cities.some((p) => p.x === x && p.y === y)
-      )
-        terrain = "grass";
-      tiles.push({ x, y, terrain, resource: cities.some(city => city.x === x && city.y === y) ? undefined : terrain === "forest" ? "forest" : terrain === "mountain" ? "mine" : terrain === "water" ? "fishery" : (x + y) % 2 === 0 ? "orchard" : "wheat" });
-    }
+  for (const tile of tiles) {
+    if (cities.some(city => city.x === tile.x && city.y === tile.y)) continue;
+    tile.resource = tile.terrain === "forest" ? "forest" : tile.terrain === "mountain" ? "mine" : tile.terrain === "water" ? "fishery" : (tile.x + tile.y) % 2 === 0 ? "orchard" : "wheat";
   }
   return {
     seed,
-    width,
-    height,
+    width: world.width,
+    height: world.height,
     revision: 0,
     activePlayerId: "player-1",
     players: starts.map((_, i) => ({
