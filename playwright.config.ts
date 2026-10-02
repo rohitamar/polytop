@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
+const serverPort = process.env.PLAYWRIGHT_SERVER_PORT ?? "3001";
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5173";
 
 export default defineConfig({
@@ -21,7 +22,8 @@ export default defineConfig({
     timeout: 60000,
   }, {
     command: "npm run start -w @reach/server",
-    url: "http://127.0.0.1:3001",
+    env: { PORT: serverPort },
+    url: `http://127.0.0.1:${serverPort}`,
     reuseExistingServer: !process.env.CI,
     timeout: 60000,
   }],

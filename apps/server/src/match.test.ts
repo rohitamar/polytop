@@ -1,4 +1,4 @@
-import { applyAction, getReachableTiles, getWorkableTiles, getAttackTargets, type GameState } from "@reach/game-core";
+import { getTerritory, applyAction, getReachableTiles, getWorkableTiles, getAttackTargets, type GameState } from "@reach/game-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
@@ -84,7 +84,7 @@ describe("lobby WebSocket server", () => {
     for (const client of [clients[index], ...clients.filter((_, i) => i !== index)]) {
       const response = await client.next();
       if (response.type !== "MATCH_STATE") throw new Error(JSON.stringify(response));
-      if (next) expect(response.state).toEqual(next);
+      if (next) { expect(response.state).toEqual(next); expect(getTerritory(response.state)).toEqual(getTerritory(next)); }
       next = response.state;
     }
     expect(next.revision).toBe(state.revision + 1);
@@ -114,7 +114,9 @@ describe("lobby WebSocket server", () => {
 
   it("synchronizes movement, capture, workers, population, upgrades and turns", async () => {
     let { clients, state } = await match();
+    const neutralTerritory = getTerritory(state).filter(tile => tile.cityId === "neutral-1");
     state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
+    expect(getTerritory(state).filter(tile => tile.cityId === "neutral-1")).toEqual(neutralTerritory.map(tile => ({ ...tile, playerId: state.players[0].id })));
     expect(state.cities.find(city => city.id === "neutral-1")!.ownerId).toBe(state.players[0].id);
     const tile = getWorkableTiles(state, "city-1").find(tile => tile.resource === "orchard" || tile.resource === "wheat")!;
     state = await act(clients, state, { type: "ASSIGN_WORKER", cityId: "city-1", tile: { x: tile.x, y: tile.y } });
@@ -194,9 +196,10 @@ describe("lobby WebSocket server", () => {
   it("isolates rooms and destroys a match on disconnect", async () => {
     const first = await match();
     const second = await match();
-    await act(first.clients, first.state, { type: "END_TURN" });
+    await act(first.clients, first.state, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
     const next = await act(second.clients, second.state, { type: "END_TURN" });
     expect(next.revision).toBe(1);
+    expect(getTerritory(next).filter(tile => tile.cityId === "neutral-1").every(tile => tile.playerId === null)).toBe(true);
     await first.clients[0].close();
     expect((await first.clients[1].next()).type).toBe("MATCH_ENDED");
     const newcomer = await connect();

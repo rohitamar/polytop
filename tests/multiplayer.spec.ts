@@ -33,9 +33,14 @@ test("independent browsers play one authoritative match including economy and co
     for (const client of [page, guest]) await expect(client.getByTestId("active-player")).toContainText("Fern");
     expect(await snapshot(guest)).toEqual(await snapshot(page));
     await expect(guest.getByRole("button", { name: "End Turn", exact: true })).toBeDisabled();
+    const neutralTerritory = await page.evaluate(() => window.__GAME_DEBUG__!.getTerritory().filter(tile => tile.cityId === "neutral-1"));
     await move(page, "warrior-1", 6, 5);
     for (const client of [page, guest]) await settled(client, 1);
     expect(await snapshot(guest)).toEqual(await snapshot(page));
+    const territory = await page.evaluate(() => window.__GAME_DEBUG__!.getTerritory());
+    expect(await guest.evaluate(() => window.__GAME_DEBUG__!.getTerritory())).toEqual(territory);
+    const ownerId = (await snapshot(page)).players[0].id;
+    expect(territory.filter(tile => tile.cityId === "neutral-1")).toEqual(neutralTerritory.map(tile => ({ ...tile, playerId: ownerId })));
     const cityPosition = await page.evaluate(() => window.__GAME_DEBUG__!.getTileScreenPosition(4, 5));
     await page.mouse.click(cityPosition.x, cityPosition.y);
     const assign = page.getByRole("button", { name: /^Assign worker/ }).first();

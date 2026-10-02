@@ -15,6 +15,8 @@ import {
   createGame,
   getReachableTiles,
   getTile,
+  getTerritory,
+  getTileTerritory,
   type GameState,
   type Position,
   type Tile,
@@ -122,6 +124,7 @@ function App() {
   const selection = useRef<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const busy = useRef(false);
+  useEffect(() => { world.current?.selectCity(selectedCityId); }, [selectedCityId, state]);
   const city = state.cities.find((city) => city.id === selectedCityId);
   const [selected, setSelected] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
@@ -362,6 +365,9 @@ function App() {
         window.__GAME_DEBUG__ = {
           getProfile: () => ({ ...instance.getProfile(), reactRenders: renders.current }),
           resetProfile: instance.resetProfile,
+          getTerritoryRenderStats: instance.getTerritoryRenderStats,
+          getTerritory: () => getTerritory(stateRef.current),
+          getTileTerritory: (x, y) => getTileTerritory(stateRef.current, x, y),
           getState: () => structuredClone(stateRef.current),
           getUnits: () => structuredClone(stateRef.current.units),
           getActivePlayer: () =>

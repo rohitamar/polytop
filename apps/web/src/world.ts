@@ -11,6 +11,7 @@ import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import "@babylonjs/core/Meshes/instancedMesh";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
@@ -29,6 +30,7 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import "@babylonjs/core/Culling/ray";
 import {
+  getTerritory,
   getReachableTiles,
   getAttackTargets,
   type CombatPreview,
@@ -490,10 +492,56 @@ export function createWorld(
     hover.setEnabled(false);
     hoveredKey = "";
   };
+  let selectedCity: string | null = null;
+  let territorySignature = "";
+  let territoryMeshes: Mesh[] = [];
+  const updateTerritory = (state: GameState, cityId: string | null) => {
+    const signature = JSON.stringify([state.width, state.height, state.tiles, state.cities.map(city => [city.id, city.x, city.y, city.ownerId]), cityId]);
+    if (signature === territorySignature) return;
+    territorySignature = signature;
+    territoryMeshes.forEach(mesh => mesh.dispose());
+    territoryMeshes = [];
+    const claims = getTerritory(state);
+    const byPosition = new Map(claims.map(tile => [positionKey(tile), tile]));
+    const batches = new Map<StandardMaterial, { positions: number[]; indices: number[] }>();
+    const quad = (mat: StandardMaterial, x: number, y: number, z: number, width: number, depth: number) => {
+      const batch = batches.get(mat) ?? { positions: [], indices: [] };
+      batches.set(mat, batch);
+      const offset = batch.positions.length / 3;
+      batch.positions.push(x - width / 2, y, z - depth / 2, x + width / 2, y, z - depth / 2, x + width / 2, y, z + depth / 2, x - width / 2, y, z + depth / 2);
+      batch.indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
+    };
+    for (const tile of claims) {
+      if (!tile.cityId) continue;
+      const point = tilePoint(tile);
+      const index = state.players.findIndex(player => player.id === tile.playerId);
+      const mat = index < 0 ? neutral : accents[index];
+      for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        const neighbor = byPosition.get(positionKey({ x: tile.x + dx, y: tile.y + dy }));
+        if (neighbor?.cityId && neighbor.playerId === tile.playerId) continue;
+        quad(mat, point.x + dx * 0.465, point.y + 0.035, point.z + dy * 0.465, dx ? 0.045 : 0.97, dy ? 0.045 : 0.97);
+      }
+      if (tile.cityId === cityId) quad(moveMaterial, point.x, point.y + 0.022, point.z, 0.91, 0.91);
+    }
+    for (const [mat, batch] of batches) {
+      const mesh = new Mesh("territory", scene);
+      const data = new VertexData();
+      data.positions = batch.positions;
+      data.indices = batch.indices;
+      data.normals = [];
+      VertexData.ComputeNormals(batch.positions, batch.indices, data.normals);
+      data.applyToMesh(mesh);
+      solid(mesh, mat, root, false);
+      mesh.freezeWorldMatrix();
+      territoryMeshes.push(mesh);
+    }
+  };
+  const selectCity = (cityId: string | null) => { selectedCity = cityId; updateTerritory(currentState, cityId); };
   const update = (state: GameState, selectedUnitId: string | null) => {
     shadowDirty = true;
     if (import.meta.env.DEV) profile.updates++;
     currentState = state;
+    updateTerritory(state, selectedCity);
     selected = selectedUnitId;
     for (const city of state.cities) {
       const signature = `${city.ownerId}:${city.townHallLevel}`;
@@ -722,6 +770,8 @@ export function createWorld(
     lastFrame = now;
   });
   return {
+    selectCity,
+    getTerritoryRenderStats: () => ({ meshes: territoryMeshes.length, quads: territoryMeshes.reduce((sum, mesh) => sum + mesh.getTotalVertices() / 4, 0), selectedCityId: selectedCity }),
     getProfile: () => ({ ...profile, meshes: scene.meshes.length, materials: scene.materials.length, loops: engine.activeRenderLoops.length }),
     resetProfile: () => { profile.frames.length = 0; profile.picks.length = 0; },
     rebuild,

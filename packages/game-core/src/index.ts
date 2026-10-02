@@ -83,6 +83,27 @@ export type GameState = {
   units: Unit[];
   cities: City[];
 };
+export const territoryRules = { radius: 2 } as const;
+export type TileTerritory = Position & { cityId: string | null; playerId: string | null };
+export function getTerritory(state: GameState, radius: number = territoryRules.radius): TileTerritory[] {
+  if (!Number.isInteger(radius) || radius < 0) throw new Error("Invalid territory radius");
+  const cities = [...state.cities].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return state.tiles.map(tile => {
+    let closest: City | undefined;
+    let best = radius + 1;
+    for (const city of cities) {
+      const distance = Math.abs(city.x - tile.x) + Math.abs(city.y - tile.y);
+      if (distance < best) {
+        closest = city;
+        best = distance;
+      }
+    }
+    return { x: tile.x, y: tile.y, cityId: closest?.id ?? null, playerId: closest?.ownerId ?? null };
+  });
+}
+export const getTileTerritory = (state: GameState, x: number, y: number) =>
+  getTerritory(state).find(tile => tile.x === x && tile.y === y);
+
 export type GameAction =
   | {
       type: "move";

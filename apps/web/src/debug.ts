@@ -1,4 +1,5 @@
 import type {
+  TileTerritory,
   GameState,
   Position,
   Tile,
@@ -10,6 +11,9 @@ import type {
 export interface GameDebug {
   getProfile(): { frames: { cpu: number; interval: number; draws: number; active: number }[]; picks: number[]; builds: number; updates: number; meshes: number; materials: number; loops: number; reactRenders: number };
   resetProfile(): void;
+  getTerritoryRenderStats(): { meshes: number; quads: number; selectedCityId: string | null };
+  getTerritory(): TileTerritory[];
+  getTileTerritory(x: number, y: number): TileTerritory | undefined;
   getState(): GameState;
   getUnits(): Unit[];
   getActivePlayer(): Player;

@@ -69,6 +69,16 @@ Only the incoming player's cities produce on turn handoff. The first player rece
 
 The worker list is the resource visualization for this milestone; dedicated orchard, fish and mine models are deferred. There are no Wood/Steel spending actions yet and no recruitment. The population costs and home-city model support future units with different costs. Tests cover production, caps, affordability, assignment validation, immutable rejection, casualties, deterministic multi-city/multi-player turns and a pointer-driven browser economy loop.
 
+## City territory
+
+`territoryRules.radius` centralizes the V1 radius (2). `getTerritory` and `getTileTerritory` in game-core derive city IDs and controlling player IDs from authoritative cities using Manhattan distance, with lexical city ID breaking equal-distance ties. City centers belong to themselves; tiles beyond the radius remain unclaimed. Neutral claims retain a city ID and a null player ID. Terrain does not block territory, so water and mountains can be claimed. Ownership changes through existing movement/combat actions transfer every tile of a captured city without storing duplicate ownership state. Town Hall levels do not affect territory.
+
+Borders use flat geometry batched by shared owner material, with gray neutral boundaries. Adjacent claims with the same player owner omit their shared edge, including claims belonging to different cities. Selecting any city highlights just its own tiles in one extra geometry batch. Geometry only rebuilds when map, city ownership/positions or selection change. There are at most ten territory batches for eight players, neutral territory and selection; no territory materials or shadow casters are added.
+
+Development snapshots expose `getTerritory`, `getTileTerritory` and `getTerritoryRenderStats`. Tests cover deterministic ownership, overlapping cities, radius limits, captures, neutral territory and multiple players; WebSocket and browser tests compare territory across clients and verify room isolation. The browser selection test checks bounded mesh counts and material reuse. To run alongside existing development servers, set `PLAYWRIGHT_BASE_URL` and `PLAYWRIGHT_SERVER_PORT` to unused local ports before `npm run test:e2e`.
+
+Territory does not add or change resource opportunities, worker assignment rules, buildings or movement restrictions. Borders follow tile surfaces and can be partially occluded by existing trees, mountains and city models.
+
 ## Scope and limitations
 
 This is a desktop-first strategy slice on a 20 x 20 map, with local two-player pass-and-play and network matches for 2-8 players. City locations are deterministic test positions rather than balanced procedural expansion placement, and distant cities are not guaranteed reachable for every terrain seed. There is no recruitment, siege, technology, accounts, persistence or fog of war. Existing empty-army restart messaging remains; cities do not create units or change victory rules. The Babylon bundle-size build warning remains nonblocking.
