@@ -1,0 +1,438 @@
+import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { Camera } from "@babylonjs/core/Cameras/camera";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
+import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Engine } from "@babylonjs/core/Engines/engine";
+import { Scene } from "@babylonjs/core/scene";
+import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
+import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
+import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
+import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
+import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
+import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
+import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
+import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
+import "@babylonjs/core/Culling/ray";
+import {
+  getReachableTiles,
+  positionKey,
+  type GameState,
+  type Position,
+  type Tile,
+} from "@reach/game-core";
+
+export type World = ReturnType<typeof createWorld>;
+
+export function createWorld(
+  canvas: HTMLCanvasElement,
+  onClick: (position: Position) => void,
+  onHover: (tile: Tile | null) => void,
+) {
+  const engine = new Engine(canvas, true, {
+    stencil: true,
+    preserveDrawingBuffer: true,
+  });
+  const scene = new Scene(engine);
+  scene.clearColor = Color4.FromHexString("#b6d6d9ff");
+  scene.ambientColor = Color3.FromHexString("#a4b7ae");
+  const camera = new ArcRotateCamera(
+    "camera",
+    -Math.PI / 4,
+    0.83,
+    22,
+    new Vector3(0, 0, 0),
+    scene,
+  );
+  camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+  camera.minZ = 0.1;
+  camera.maxZ = 100;
+  camera.attachControl(canvas, true);
+  camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
+  camera.lowerBetaLimit = 0.6;
+  camera.upperBetaLimit = 1.1;
+  camera.panningSensibility = 0;
+  camera.angularSensibilityX = 650;
+  camera.angularSensibilityY = 650;
+  const pointerInput = camera.inputs.attached.pointers as unknown as {
+    buttons: number[];
+  };
+  pointerInput.buttons = [2];
+  let zoom = 8.1;
+  const resize = () => {
+    engine.resize();
+    const ratio = canvas.clientWidth / canvas.clientHeight;
+    camera.orthoTop = zoom;
+    camera.orthoBottom = -zoom;
+    camera.orthoLeft = -zoom * ratio;
+    camera.orthoRight = zoom * ratio;
+  };
+  const wheel = (event: WheelEvent) => {
+    event.preventDefault();
+    zoom = Math.max(5.8, Math.min(11, zoom + event.deltaY * 0.006));
+    resize();
+  };
+  const contextMenu = (event: Event) => event.preventDefault();
+  canvas.addEventListener("wheel", wheel, { passive: false });
+  canvas.addEventListener("contextmenu", contextMenu);
+  window.addEventListener("resize", resize);
+  const fill = new HemisphericLight("sky", new Vector3(0, 1, 0), scene);
+  fill.intensity = 0.65;
+  fill.groundColor = Color3.FromHexString("#617b72");
+  const sun = new DirectionalLight("sun", new Vector3(-0.5, -1, 0.4), scene);
+  sun.position = new Vector3(8, 18, -8);
+  sun.intensity = 0.85;
+  const shadows = new ShadowGenerator(2048, sun);
+  shadows.useBlurExponentialShadowMap = true;
+  shadows.blurKernel = 24;
+  shadows.setDarkness(0.25);
+  const material = (name: string, color: string, alpha = 1) => {
+    const result = new StandardMaterial(name, scene);
+    result.diffuseColor = Color3.FromHexString(color);
+    result.specularColor = Color3.Black();
+    result.alpha = alpha;
+    return result;
+  };
+  const grass = [
+    material("meadow", "#9caf70"),
+    material("sage", "#aab97b"),
+    material("moss", "#91a76c"),
+  ];
+  const water = material("lagoon", "#60a6ae");
+  const earth = material("earth", "#657b68");
+  const bark = material("cedar", "#796348");
+  const leaves = [
+    material("pine", "#376d57"),
+    material("pine light", "#51866a"),
+  ];
+  const rock = material("slate", "#89968e");
+  const snow = material("chalk", "#e5e9d5");
+  const gold = material("brass", "#d9ab58");
+  const cloak = material("saffron", "#e78848");
+  const armor = material("ivory", "#ece5c9");
+  const dark = material("ink", "#344f50");
+  const face = material("skin", "#dca778");
+  const foam = material("ripples", "#a7dbd7", 0.6);
+  const moveMaterial = material("reachable", "#f5e5a6", 0.46);
+  moveMaterial.emissiveColor = Color3.FromHexString("#645a24");
+  const hoverMaterial = material("hover", "#ffffff", 0.23);
+  hoverMaterial.emissiveColor = Color3.FromHexString("#698b7b");
+  const selectionMaterial = material("selection", "#ffe29b");
+  selectionMaterial.emissiveColor = Color3.FromHexString("#a87c32");
+  const root = new TransformNode("map", scene);
+  let decorations: Mesh[] = [];
+  let markers: Mesh[] = [];
+  let currentState: GameState;
+  let selected = false;
+  const tileHeight = (tile?: Tile) =>
+    tile?.terrain === "water" ? -0.12 : 0.13;
+  const tilePoint = (p: Position) =>
+    new Vector3(
+      p.x - 4.5,
+      tileHeight(currentState?.tiles.find((t) => t.x === p.x && t.y === p.y)),
+      p.y - 4.5,
+    );
+  const solid = (
+    mesh: Mesh,
+    mat: StandardMaterial,
+    parent: TransformNode = root,
+    cast = true,
+  ) => {
+    mesh.material = mat;
+    mesh.parent = parent;
+    mesh.isPickable = false;
+    if (cast) shadows.addShadowCaster(mesh);
+    return mesh;
+  };
+  const box = (
+    name: string,
+    width: number,
+    height: number,
+    depth: number,
+    mat: StandardMaterial,
+    parent?: TransformNode,
+  ) => solid(CreateBox(name, { width, height, depth }, scene), mat, parent);
+  const cone = (
+    name: string,
+    height: number,
+    bottom: number,
+    mat: StandardMaterial,
+    parent?: TransformNode,
+    top = 0,
+  ) => {
+    const mesh = CreateCylinder(
+      name,
+      { height, diameterBottom: bottom, diameterTop: top, tessellation: 5 },
+      scene,
+    );
+    mesh.convertToFlatShadedMesh();
+    return solid(mesh, mat, parent);
+  };
+  const base = box("floating island", 10.15, 0.62, 10.15, earth);
+  base.position.y = -0.45;
+  const bottom = box("island foundation", 9.8, 0.22, 9.8, dark);
+  bottom.position.y = -0.84;
+  const floor = solid(
+    CreateGround("background", { width: 200, height: 200 }, scene),
+    material("mist", "#94b5b6"),
+    root,
+    false,
+  );
+  floor.position.y = -1.15;
+  floor.receiveShadows = true;
+  const warrior = new TransformNode("warrior", scene);
+  for (const x of [-0.12, 0.12]) {
+    const boot = box("boot", 0.16, 0.17, 0.23, dark, warrior);
+    boot.position.set(x, 0.12, -0.02);
+  }
+  const body = cone("tunic", 0.43, 0.43, armor, warrior, 0.33);
+  body.position.y = 0.4;
+  const cape = box("cape", 0.39, 0.47, 0.1, cloak, warrior);
+  cape.position.set(0, 0.42, 0.17);
+  cape.rotation.x = -0.2;
+  const head = solid(
+    CreateSphere("head", { diameter: 0.3, segments: 4 }, scene),
+    face,
+    warrior,
+  );
+  head.position.y = 0.78;
+  const helmet = cone("helmet", 0.23, 0.39, armor, warrior, 0.22);
+  helmet.position.y = 0.9;
+  const plume = box("plume", 0.08, 0.24, 0.22, cloak, warrior);
+  plume.position.y = 1.09;
+  const visor = box("visor", 0.24, 0.055, 0.07, dark, warrior);
+  visor.position.set(0, 0.8, -0.145);
+  const shield = cone("shield", 0.1, 0.43, gold, warrior, 0.43);
+  shield.rotation.x = Math.PI / 2;
+  shield.position.set(-0.29, 0.44, -0.11);
+  const emblem = box("shield emblem", 0.05, 0.22, 0.12, armor, warrior);
+  emblem.position.set(-0.29, 0.44, -0.15);
+  const blade = box("blade", 0.075, 0.53, 0.065, snow, warrior);
+  blade.position.set(0.3, 0.58, -0.05);
+  blade.rotation.z = -0.15;
+  const guard = box("guard", 0.23, 0.065, 0.08, gold, warrior);
+  guard.position.set(0.26, 0.34, -0.05);
+  for (const mesh of warrior.getChildMeshes()) {
+    mesh.isPickable = true;
+    mesh.metadata = { unit: true };
+  }
+  const halo = solid(
+    CreateTorus(
+      "selected unit",
+      { diameter: 0.79, thickness: 0.045, tessellation: 48 },
+      scene,
+    ),
+    selectionMaterial,
+    root,
+    false,
+  );
+  const hover = box("hover", 0.95, 0.014, 0.95, hoverMaterial);
+  hover.setEnabled(false);
+  let animation: { path: Vector3[]; started: number; done: () => void } | null =
+    null;
+  let hoveredKey = "";
+  scene.onPointerObservable.add((info) => {
+    if (
+      info.type !== PointerEventTypes.POINTERMOVE &&
+      info.type !== PointerEventTypes.POINTERTAP
+    )
+      return;
+    const pick = scene.pick(scene.pointerX, scene.pointerY);
+    const metadata = pick?.pickedMesh?.metadata;
+    const tile = metadata?.unit
+      ? currentState?.tiles.find(
+          (t) =>
+            t.x === currentState.units[0].x && t.y === currentState.units[0].y,
+        )
+      : (metadata?.tile as Tile | undefined);
+    if (info.type === PointerEventTypes.POINTERMOVE) {
+      const key = tile ? positionKey(tile) : "";
+      if (key !== hoveredKey) {
+        hoveredKey = key;
+        onHover(tile ?? null);
+      }
+      hover.setEnabled(!!tile);
+      if (tile)
+        hover.position.copyFrom(tilePoint(tile).add(new Vector3(0, 0.027, 0)));
+      canvas.style.cursor = tile ? "pointer" : "grab";
+    } else if (tile && (info.event as PointerEvent).button === 0) onClick(tile);
+  });
+  const rebuild = (state: GameState) => {
+    for (const mesh of decorations) mesh.dispose();
+    decorations = [];
+    currentState = state;
+    for (const tile of state.tiles) {
+      const before = new Set(scene.meshes);
+      const point = tilePoint(tile);
+      const terrain = box(
+        `tile-${tile.x}-${tile.y}`,
+        0.975,
+        tile.terrain === "water" ? 0.15 : 0.4,
+        0.975,
+        tile.terrain === "water" ? water : grass[(tile.x * 3 + tile.y * 7) % 3],
+      );
+      terrain.position.set(
+        point.x,
+        point.y - (tile.terrain === "water" ? 0.075 : 0.2),
+        point.z,
+      );
+      terrain.isPickable = true;
+      terrain.metadata = { tile };
+      terrain.receiveShadows = true;
+      if (tile.terrain === "forest") {
+        for (const [dx, dz, scale] of [
+          [-0.19, 0.12, 0.85],
+          [0.2, -0.14, 1.1],
+          [-0.2, -0.23, 0.65],
+        ]) {
+          const trunk = cone("trunk", 0.4 * scale, 0.1, bark);
+          trunk.position.set(point.x + dx, point.y + 0.2 * scale, point.z + dz);
+          for (let level = 0; level < 2; level++) {
+            const leaf = cone(
+              "cedar canopy",
+              0.63 * scale,
+              (0.48 - level * 0.13) * scale,
+              leaves[(tile.x + level) % 2],
+            );
+            leaf.position.set(
+              point.x + dx,
+              point.y + (0.5 + level * 0.23) * scale,
+              point.z + dz,
+            );
+          }
+        }
+      }
+      if (tile.terrain === "mountain") {
+        const peak = cone("mountain", 1.08, 0.91, rock);
+        peak.position.set(point.x, point.y + 0.54, point.z);
+        peak.rotation.y = tile.x;
+        const cap = cone("snowcap", 0.33, 0.28, snow);
+        cap.position.set(point.x, point.y + 0.93, point.z);
+        cap.rotation.y = tile.x;
+      }
+      if (tile.terrain === "water") {
+        for (let i = 0; i < 2; i++) {
+          const ripple = box("ripple", 0.18 + i * 0.12, 0.007, 0.018, foam);
+          ripple.position.set(
+            point.x - 0.1 + i * 0.23,
+            point.y + 0.01,
+            point.z - 0.19 + i * 0.35,
+          );
+        }
+      }
+      decorations.push(
+        ...(scene.meshes.filter((mesh) => !before.has(mesh)) as Mesh[]),
+      );
+    }
+    warrior.position.copyFrom(tilePoint(state.units[0]));
+  };
+  const update = (state: GameState, isSelected: boolean) => {
+    currentState = state;
+    selected = isSelected;
+    markers.forEach((mesh) => mesh.dispose());
+    markers = [];
+    if (selected) {
+      for (const tile of getReachableTiles(state, state.units[0].id)) {
+        const marker = box("legal move", 0.85, 0.018, 0.85, moveMaterial);
+        marker.position.copyFrom(tilePoint(tile).add(new Vector3(0, 0.015, 0)));
+        markers.push(marker);
+        const dot = solid(
+          CreateCylinder(
+            "move pip",
+            { height: 0.012, diameter: 0.1, tessellation: 16 },
+            scene,
+          ),
+          selectionMaterial,
+          root,
+          false,
+        );
+        dot.position.copyFrom(marker.position.add(new Vector3(0, 0.018, 0)));
+        markers.push(dot);
+      }
+    }
+  };
+  const move = (path: Position[]) =>
+    new Promise<void>((resolve) => {
+      animation = {
+        path: [warrior.position.clone(), ...path.map(tilePoint)],
+        started: performance.now(),
+        done: resolve,
+      };
+    });
+  const project = (position: Position, height = 0.04) => {
+    scene.updateTransformMatrix(true);
+    const point = Vector3.Project(
+      tilePoint(position).add(new Vector3(0, height, 0)),
+      Matrix.Identity(),
+      scene.getTransformMatrix(),
+      camera.viewport.toGlobal(
+        engine.getRenderWidth(),
+        engine.getRenderHeight(),
+      ),
+    );
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: rect.left + (point.x * rect.width) / engine.getRenderWidth(),
+      y: rect.top + (point.y * rect.height) / engine.getRenderHeight(),
+    };
+  };
+  resize();
+  engine.runRenderLoop(() => {
+    const now = performance.now();
+    if (animation) {
+      const elapsed = (now - animation.started) / 440;
+      const segment = Math.min(Math.floor(elapsed), animation.path.length - 2);
+      const t = Math.min(1, elapsed - segment);
+      const eased = t * t * (3 - 2 * t);
+      const from = animation.path[segment];
+      const to = animation.path[segment + 1];
+      warrior.position.copyFrom(Vector3.Lerp(from, to, eased));
+      warrior.position.y += Math.sin(t * Math.PI) * 0.24;
+      warrior.rotation.y = Math.atan2(to.x - from.x, to.z - from.z) + Math.PI;
+      if (elapsed >= animation.path.length - 1) {
+        warrior.position.copyFrom(animation.path.at(-1)!);
+        const done = animation.done;
+        animation = null;
+        done();
+      }
+    }
+    halo.setEnabled(selected);
+    halo.position.copyFrom(warrior.position.add(new Vector3(0, 0.025, 0)));
+    halo.scaling.setAll(1 + Math.sin(now / 330) * 0.025);
+    scene.render();
+  });
+  return {
+    rebuild,
+    update,
+    move,
+    project,
+    isAnimating: () => animation !== null,
+    getVisualPosition: () => ({
+      x: warrior.position.x + 4.5,
+      y: warrior.position.z + 4.5,
+      elevation: warrior.position.y,
+    }),
+    getMarkerCount: () => markers.length / 2,
+    getHoveredTile: () => hoveredKey,
+    resetCamera: () => {
+      camera.inertialAlphaOffset = 0;
+      camera.inertialBetaOffset = 0;
+      camera.alpha = -Math.PI / 4;
+      camera.beta = 0.83;
+      zoom = 8.1;
+      resize();
+    },
+    dispose: () => {
+      window.removeEventListener("resize", resize);
+      canvas.removeEventListener("wheel", wheel);
+      canvas.removeEventListener("contextmenu", contextMenu);
+      engine.stopRenderLoop();
+      scene.dispose();
+      engine.dispose();
+    },
+  };
+}

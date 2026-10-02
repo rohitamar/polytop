@@ -1,0 +1,10 @@
+{
+  "name": "@reach/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@reach/game-core": "*",
+    "@reach/protocol": "*"
+  }
+}
