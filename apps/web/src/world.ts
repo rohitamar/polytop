@@ -53,6 +53,8 @@ export function createWorld(
   });
   const scene = new Scene(engine);
   scene.pointerMovePredicate = (mesh) => mesh.isPickable && mesh.isEnabled() && mesh.isVisible;
+  scene.pointerDownPredicate = scene.pointerMovePredicate;
+  scene.pointerUpPredicate = scene.pointerMovePredicate;
   const profile = { frames: [] as { cpu: number; interval: number; draws: number; active: number }[], picks: [] as number[], builds: 0, updates: 0 };
   let lastFrame = performance.now();
   if (import.meta.env.DEV) {
@@ -351,12 +353,20 @@ export function createWorld(
     done: () => void;
   } | null = null;
   let hoveredKey = "";
+  let press: { x: number; y: number; pointerId: number; dragged: boolean } | null = null;
   scene.onPointerObservable.add((info) => {
-    if (
-      info.type !== PointerEventTypes.POINTERMOVE &&
-      info.type !== PointerEventTypes.POINTERTAP
-    )
+    const event = info.event as PointerEvent;
+    if (info.type === PointerEventTypes.POINTERDOWN) {
+      press = event.button === 0 ? { x: event.clientX, y: event.clientY, pointerId: event.pointerId, dragged: false } : null;
       return;
+    }
+    if (press && event.pointerId === press.pointerId &&
+      (Math.abs(event.clientX - press.x) > 10 || Math.abs(event.clientY - press.y) > 10)) press.dragged = true;
+    if (info.type === PointerEventTypes.POINTERUP) {
+      const clicked = event.button === 0 && press?.pointerId === event.pointerId && !press.dragged;
+      press = null;
+      if (!clicked) return;
+    }
     const pick = info.pickInfo;
     const metadata = pick?.pickedMesh?.metadata;
     const pickedUnit = currentState?.units.find(
@@ -388,7 +398,7 @@ export function createWorld(
             ? "pointer"
             : "grab";
     } else if (tile && (info.event as PointerEvent).button === 0) onClick(tile);
-  });
+  }, PointerEventTypes.POINTERMOVE | PointerEventTypes.POINTERDOWN | PointerEventTypes.POINTERUP);
   const rebuild = (state: GameState) => {
     shadowDirty = true;
     if (import.meta.env.DEV) profile.builds++;

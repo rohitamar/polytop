@@ -22,3 +22,20 @@ The shadow texture now refreshes for map/state changes, movement and combat, cam
 Raw samples are in `scene-profile-before.json` and `scene-profile-after.json`. The development-only `window.__GAME_DEBUG__.getProfile()` and `resetProfile()` expose bounded frame/pick samples, React render counts, mesh/material counts, rebuild/update counts, and loop count. Production gameplay does not depend on these measurements.
 
 To repeat, start `npm run dev:web -- --strictPort --port 5183`, then run `node scripts/profile-scene.mjs after`. Set `PLAYWRIGHT_BASE_URL` for another port. The script writes JSON and screenshots to the current directory. Run benchmarks separately from browser tests to avoid competing software GPU workloads. All gameplay decisions remain in game-core.
+
+## Economy integration verification
+
+The economy was committed as `3df6148`, profiling as `a5b238f`, and both combined on local `main` in merge `ca1b6c0`. The same benchmark was repeated on the combined version, without concurrent browser tests. Raw results are in `scene-profile-economy.json`. The `economy` argument additionally assigns two workers, completes four handoffs, grows city population, and upgrades its Town Hall through real UI controls, then samples the settled scene with the city panel and selected unit visible.
+
+| Combined scenario | Active meshes | Draw calls/frame | CPU render mean (ms) | Frame interval mean / p95 (ms) | Effective FPS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Idle | 1500 | 322 | 2.78 | 36.94 / 38.60 | 27.07 |
+| Hover | 1501 p95 | 323 p95 | 2.75 | 38.90 / 41.20 | 25.71 |
+| Selected unit + city panel | 1524 | 346 | 2.97 | 39.19 / 39.70 | 25.52 |
+| Grown population + level 2 Town Hall | 1526 | 348 | 2.99 | 38.56 / 39.90 | 25.93 |
+
+Picking averages 0.45 ms, p95 0.60 ms across 100 hover moves. Idle, selected, and upgraded-city samples have zero React renders, rebuilds, or world updates; hover has 42 React renders. Every sample has one render loop. The upgrade adds two house/roof meshes and two steady draw calls. There is no observed performance regression from the economy integration. The faster wall-clock results relative to the earlier optimized run should be treated as run-to-run variation, not evidence that the economy itself improves FPS. These remain SwiftShader measurements, not hardware GPU timings.
+
+Integration testing exposed a timing-sensitive input issue: Babylon's camera subscribes to double taps, so a rapid second click can be classified as a double tap instead of the single tap the old gameplay handler accepted. Diagnostic pointer logs confirmed the reclassification during select-then-move and select-then-attack. The centralized observer now handles pointer down/move/up, accepting left-button releases only when the pointer has not exceeded the existing 10px drag threshold. Hover and clicks share the same pickable/visible/enabled predicate, preserving the original explicit-pick eligibility while reusing event pick results. Right-drag orbiting remains intact. The final measurements above include this fix. All 101 unit tests, all six browser regressions in one complete run, typechecking, and the production build pass. The existing production bundle-size warning remains.
+
+Repeat with `node scripts/profile-scene.mjs economy`. It also captures `profile-economy-upgradedCity.png`. The benchmark always closes its browser, including on failure.

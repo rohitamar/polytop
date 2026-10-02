@@ -1,0 +1,122 @@
+{
+  "gpu": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+  "results": {
+    "idle": {
+      "meshes": 1502,
+      "materials": 41,
+      "active": {
+        "mean": 1500,
+        "p95": 1500
+      },
+      "draws": {
+        "mean": 322,
+        "p95": 322
+      },
+      "cpuMs": {
+        "mean": 2.778676470632062,
+        "p95": 3
+      },
+      "intervalMs": {
+        "mean": 36.9375,
+        "p95": 38.599999997764826
+      },
+      "picks": 0,
+      "pickMs": {
+        "mean": null
+      },
+      "reactRenders": 0,
+      "builds": 0,
+      "updates": 0,
+      "loops": 1,
+      "frames": 136
+    },
+    "hover": {
+      "meshes": 1502,
+      "materials": 41,
+      "active": {
+        "mean": 1500.990099009901,
+        "p95": 1501
+      },
+      "draws": {
+        "mean": 322.990099009901,
+        "p95": 323
+      },
+      "cpuMs": {
+        "mean": 2.7495049504507887,
+        "p95": 3.2000000029802322
+      },
+      "intervalMs": {
+        "mean": 38.89702970298505,
+        "p95": 41.20000000298023
+      },
+      "picks": 100,
+      "pickMs": {
+        "mean": 0.45,
+        "p95": 0.6000000014901161
+      },
+      "reactRenders": 42,
+      "builds": 0,
+      "updates": 0,
+      "loops": 1,
+      "frames": 101
+    },
+    "selected": {
+      "meshes": 1524,
+      "materials": 41,
+      "active": {
+        "mean": 1524,
+        "p95": 1524
+      },
+      "draws": {
+        "mean": 346,
+        "p95": 346
+      },
+      "cpuMs": {
+        "mean": 2.9746153846956216,
+        "p95": 3.199999999254942
+      },
+      "intervalMs": {
+        "mean": 39.19230769230769,
+        "p95": 39.70000000298023
+      },
+      "picks": 0,
+      "pickMs": {
+        "mean": null
+      },
+      "reactRenders": 0,
+      "builds": 0,
+      "updates": 0,
+      "loops": 1,
+      "frames": 130
+    },
+    "upgradedCity": {
+      "meshes": 1526,
+      "materials": 41,
+      "active": {
+        "mean": 1526,
+        "p95": 1526
+      },
+      "draws": {
+        "mean": 348,
+        "p95": 348
+      },
+      "cpuMs": {
+        "mean": 2.986153846205427,
+        "p95": 3.2000000029802322
+      },
+      "intervalMs": {
+        "mean": 38.564615384603925,
+        "p95": 39.899999998509884
+      },
+      "picks": 0,
+      "pickMs": {
+        "mean": null
+      },
+      "reactRenders": 0,
+      "builds": 0,
+      "updates": 0,
+      "loops": 1,
+      "frames": 130
+    }
+  }
+}
