@@ -134,7 +134,7 @@ test("rejects blocked moves, protects debug snapshots, resets seed and supports 
       (tile) =>
         tile.x > 2 &&
         tile.x < 7 &&
-        tile.y > 2 &&
+        tile.y > 5 &&
         tile.y < 7 &&
         tile.terrain === "water",
     ) ?? before.tiles.find((tile) => tile.terrain === "water")!;

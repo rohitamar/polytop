@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAction,
+  warriorStats,
   createGame,
   getReachableTiles,
   getTile,
@@ -27,7 +28,17 @@ function fixture(): GameState {
       terrain: "grass",
     })),
     units: [
-      { id: "u1", ownerId: "p1", x: 2, y: 2, movement: 2, maxMovement: 2 },
+      {
+        ...warriorStats,
+        hp: 10,
+        hasAttacked: false,
+        id: "u1",
+        ownerId: "p1",
+        x: 2,
+        y: 2,
+        movement: 2,
+        maxMovement: 2,
+      },
     ],
   };
 }
@@ -46,7 +57,8 @@ describe("seeded world", () => {
   it("reproduces the same complete state from a seed", () => {
     expect(createGame("island")).toEqual(createGame("island"));
     expect(createGame("island").tiles).not.toEqual(createGame("other").tiles);
-    expect(createGame().tiles).toHaveLength(100);
+    expect(createGame()).toMatchObject({ width: 20, height: 20 });
+    expect(createGame().tiles).toHaveLength(400);
   });
   it("always gives the warrior a playable start", () => {
     for (let i = 0; i < 50; i++) {
@@ -103,6 +115,9 @@ describe("weighted movement", () => {
   it("blocks occupied destinations and passage through occupied tiles", () => {
     const state = fixture();
     state.units.push({
+      ...warriorStats,
+      hp: 10,
+      hasAttacked: false,
       id: "u2",
       ownerId: "p1",
       x: 3,

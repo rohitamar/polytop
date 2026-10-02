@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAction,
+  warriorStats,
   createGame,
   getReachableTiles,
   getTile,
@@ -89,6 +90,9 @@ describe("player turns", () => {
   it("hands off and restores only the incoming owner's units to their own budgets", () => {
     const state = createGame();
     state.units.push({
+      ...warriorStats,
+      hp: 10,
+      hasAttacked: false,
       id: "extra",
       ownerId: "player-2",
       x: 8,

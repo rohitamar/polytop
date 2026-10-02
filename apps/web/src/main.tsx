@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   applyAction,
+  getAttackTargets,
+  previewCombat,
   createGame,
   getReachableTiles,
   getTile,
@@ -50,6 +52,8 @@ function App() {
   const busy = useRef(false);
   const [state, setState] = useState<GameState>(stateRef.current);
   const [selected, setSelected] = useState<string | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
+  const targetRef = useRef<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [hovered, setHovered] = useState<Tile | null>(null);
   const [notice, setNotice] = useState(
@@ -67,7 +71,7 @@ function App() {
   );
   const unit =
     state.units.find((unit) => unit.id === selected) ?? activeUnits[0];
-  const owner = state.players.find((player) => player.id === unit.ownerId)!;
+  const owner = state.players.find((player) => player.id === unit?.ownerId);
   const availableMovement = activeUnits.reduce(
     (total, unit) => total + unit.movement,
     0,
@@ -77,6 +81,17 @@ function App() {
     0,
   );
 
+  const combat =
+    selected &&
+    target &&
+    !moving &&
+    getAttackTargets(state, selected).some((unit) => unit.id === target)
+      ? previewCombat(state, selected, target)
+      : null;
+  const clearTarget = () => {
+    targetRef.current = null;
+    setTarget(null);
+  };
   const select = (value: string | null) => {
     if (
       value &&
@@ -86,6 +101,7 @@ function App() {
       )
     )
       return;
+    clearTarget();
     selection.current = value;
     setBlockedOwner(null);
     setSelected(value);
@@ -115,6 +131,40 @@ function App() {
     setNotice(`${player.name}'s turn. Select your warrior to move.`);
   };
 
+  const attack = async () => {
+    if (busy.current || !selection.current || !targetRef.current) return;
+    const current = stateRef.current;
+    const result = previewCombat(current, selection.current, targetRef.current);
+    const next = applyAction(current, {
+      type: "ATTACK_UNIT",
+      playerId: current.activePlayerId,
+      unitId: result.attackerId,
+      targetId: result.defenderId,
+    });
+    busy.current = true;
+    setMoving(true);
+    clearTarget();
+    stateRef.current = next;
+    setState(next);
+    world.current!.update(next, null);
+    setNotice("Blades meet…");
+    await world.current!.combat(current, next, result);
+    if (!world.current) return;
+    busy.current = false;
+    setMoving(false);
+    select(
+      next.units.some((unit) => unit.id === result.attackerId)
+        ? result.attackerId
+        : null,
+    );
+    const survivingOwners = new Set(next.units.map((unit) => unit.ownerId));
+    setNotice(
+      survivingOwners.size === 1
+        ? `${next.players.find((player) => survivingOwners.has(player.id))!.name} holds the island. Restart for another duel.`
+        : "Attack complete. This warrior is done for the turn.",
+    );
+  };
+
   useEffect(() => {
     let alive = true;
     const click = async (position: Position) => {
@@ -125,6 +175,17 @@ function App() {
       );
       if (clickedUnit) {
         if (clickedUnit.ownerId !== current.activePlayerId) {
+          if (
+            selection.current &&
+            getAttackTargets(current, selection.current).some(
+              (unit) => unit.id === clickedUnit.id,
+            )
+          ) {
+            targetRef.current = clickedUnit.id;
+            setTarget(clickedUnit.id);
+            setNotice("Review the combat preview, then confirm Attack.");
+            return;
+          }
           select(null);
           const owner = current.players.find(
             (player) => player.id === clickedUnit.ownerId,
@@ -141,6 +202,7 @@ function App() {
         );
         return;
       }
+      clearTarget();
       const warrior = current.units.find(
         (unit) => unit.id === selection.current,
       );
@@ -235,6 +297,7 @@ function App() {
       window.removeEventListener("keydown", keydown);
       if (import.meta.env.DEV) delete window.__GAME_DEBUG__;
       world.current?.dispose();
+      world.current = null;
     };
   }, []);
 
@@ -279,7 +342,10 @@ function App() {
           Two companies. A world of possibility.
         </p>
         <div className="map-label">
-          <span /> THE FERN ISLES <small>10 × 10</small>
+          <span /> THE FERN ISLES{" "}
+          <small>
+            {state.width} × {state.height}
+          </small>
         </div>
       </section>
       <aside className="expedition-card">
@@ -357,67 +423,103 @@ function App() {
           </>
         )}
       </div>
-      <section className={`unit-card ${selected ? "selected" : ""}`}>
-        <div
-          className="unit-portrait"
-          style={{
-            background: playerStyle(
-              state.players.findIndex((player) => player.id === unit.ownerId),
-            ).accent,
-          }}
-        >
-          <span className="portrait-crest">✦</span>
-          <Icon name="flag" />
-          <span className="portrait-level">I</span>
-        </div>
-        <div className="unit-info">
-          <div className="eyebrow">
-            {selected
-              ? `OWNER · ${owner.name.toUpperCase()}`
-              : "READY TO EXPLORE"}
+      {unit && owner && (
+        <section className={`unit-card ${selected ? "selected" : ""}`}>
+          <div
+            className="unit-portrait"
+            style={{
+              background: playerStyle(
+                state.players.findIndex((player) => player.id === unit.ownerId),
+              ).accent,
+            }}
+          >
+            <span className="portrait-crest">✦</span>
+            <Icon name="flag" />
+            <span className="portrait-level">I</span>
           </div>
-          <h2>{owner.name} warrior</h2>
+          <div className="unit-info">
+            <div className="eyebrow">
+              {selected
+                ? `OWNER · ${owner.name.toUpperCase()}`
+                : "READY TO EXPLORE"}
+            </div>
+            <h2>{owner.name} warrior</h2>
+            <p>
+              {blockedOwner
+                ? `${blockedOwner}'s warrior cannot act this turn.`
+                : moving
+                  ? "Crossing new ground…"
+                  : selected
+                    ? unit.hasAttacked
+                      ? "Action spent. End your turn."
+                      : unit.movement
+                        ? "Choose a golden tile to move."
+                        : getAttackTargets(state, unit.id).length
+                          ? "Movement spent. Click a red target to attack."
+                          : "Movement spent. End your turn."
+                    : "Click your warrior on the island."}
+            </p>
+            <div className="unit-meta">
+              <span className="health-line" />{" "}
+              <span>
+                {unit.hp} / {unit.maxHp} HP
+              </span>
+              <span className="meta-divider" />
+              <span className="movement-pips">
+                {Array.from({ length: unit.maxMovement }, (_, i) => (
+                  <i key={i} className={unit.movement > i ? "filled" : ""} />
+                ))}
+              </span>
+              <span>
+                {unit.movement} / {unit.maxMovement} movement
+              </span>
+            </div>
+          </div>
+          <button
+            className="select-button"
+            disabled={moving}
+            onClick={() => {
+              if (busy.current) return;
+              select(unit.id);
+              setNotice(
+                unit.movement
+                  ? "Choose a highlighted tile to move."
+                  : "Movement spent. End your turn to continue.",
+              );
+            }}
+            aria-label="Select warrior"
+          >
+            <Icon name="arrow" />
+          </button>
+        </section>
+      )}
+      {combat && unit && (
+        <section className="combat-preview" aria-label="Combat preview">
+          <div className="eyebrow">MELEE · COMBAT PREVIEW</div>
           <p>
-            {blockedOwner
-              ? `${blockedOwner}'s warrior cannot act this turn.`
-              : moving
-                ? "Crossing new ground…"
-                : selected
-                  ? unit.movement
-                    ? "Choose a golden tile to move."
-                    : "Movement spent. End your turn."
-                  : "Click your warrior on the island."}
+            You: {unit.hp} → {combat.attackerHp}
           </p>
-          <div className="unit-meta">
-            <span className="health-line" /> <span>10 / 10</span>
-            <span className="meta-divider" />
-            <span className="movement-pips">
-              {Array.from({ length: unit.maxMovement }, (_, i) => (
-                <i key={i} className={unit.movement > i ? "filled" : ""} />
-              ))}
-            </span>
-            <span>
-              {unit.movement} / {unit.maxMovement} movement
-            </span>
-          </div>
-        </div>
-        <button
-          className="select-button"
-          disabled={moving}
-          onClick={() => {
-            if (busy.current) return;
-            select(unit.id);
-            setNotice(
-              unit.movement
-                ? "Choose a highlighted tile to move."
-                : "Movement spent. End your turn to continue.",
-            );
-          }}
-          aria-label="Select warrior"
-        >
-          <Icon name="arrow" />
-        </button>
-      </section>
+          <p>
+            Enemy: {state.units.find((unit) => unit.id === target)!.hp} →{" "}
+            {combat.defenderHp}
+          </p>
+          <small>
+            {combat.damage} damage · {combat.retaliation} retaliation
+          </small>
+          <button onClick={attack} disabled={moving}>
+            Attack
+          </button>
+          <button onClick={clearTarget} disabled={moving}>
+            Cancel
+          </button>
+        </section>
+      )}
+      {!unit && (
+        <section className="combat-preview">
+          <p>No warriors remain for {activePlayer.name}.</p>
+          <p>Restart for another duel.</p>
+        </section>
+      )}
       <div className="bottom-status" role="status">
         <span />
         {notice}
@@ -461,6 +563,12 @@ function App() {
             Select the active company's warrior and click a golden tile. Each
             warrior has two movement points per turn. End Turn passes control to
             the other company; your movement resets when your next turn begins.
+          </p>
+          <p>
+            Click an adjacent enemy on a red tile to preview combat, then
+            confirm Attack. Moving first is allowed; attacking ends that
+            warrior's actions. Injured warriors deal less damage. Surviving
+            defenders retaliate.
           </p>
           <ul>
             <li>Grass costs 1 point.</li>

@@ -756,3 +756,48 @@ footer i {
     display: none;
   }
 }
+
+.combat-preview {
+  position: absolute;
+  right: 30px;
+  bottom: 185px;
+  padding: 20px;
+  border: 1px solid #c4cbbb;
+  border-radius: 12px;
+  background: #f6f3e8;
+  color: #344f50;
+  box-shadow: 0 8px 30px #344f5020;
+}
+.combat-preview p {
+  margin: 10px 0;
+}
+.combat-preview small {
+  display: block;
+  margin-bottom: 14px;
+}
+.combat-preview button {
+  padding: 9px 16px;
+  margin-right: 8px;
+  border: 1px solid #bcc8b8;
+  border-radius: 5px;
+  background: transparent;
+  color: #344f50;
+  font: inherit;
+  cursor: pointer;
+}
+.combat-preview button:first-of-type {
+  background: #234c45;
+  color: #f6f3e8;
+  border-color: #234c45;
+}
+.combat-preview button:focus-visible {
+  outline: 2px solid #d9ab58;
+  outline-offset: 3px;
+}
+@media (max-width: 700px) {
+  .combat-preview {
+    right: 15px;
+    bottom: 230px;
+    padding: 12px;
+  }
+}
