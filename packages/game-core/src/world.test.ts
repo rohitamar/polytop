@@ -37,10 +37,10 @@ describe("strategic worlds", () => {
         expect(city).toMatchObject({ x: unit.x, y: unit.y, ownerId: unit.ownerId });
         const near = state.tiles.filter(tile => Math.abs(tile.x - city.x) + Math.abs(tile.y - city.y) <= terrainRules.safeRadius);
         expect(near).toHaveLength(13);
-        expect(near.every(tile => tile.terrain === "grass")).toBe(true);
+        expect(near.every(tile => Number.isFinite(movementCost[tile.terrain]))).toBe(true);
         expect(getTerritory(state).find(tile => tile.x === city.x && tile.y === city.y)).toMatchObject({ cityId: city.id, playerId: city.ownerId });
         for (const other of state.units.filter(other => other.id !== unit.id)) expect(Math.abs(unit.x - other.x) + Math.abs(unit.y - other.y)).toBeGreaterThanOrEqual(6);
-        expect(getReachableTiles({ ...state, activePlayerId: unit.ownerId, units: state.units.map(other => ({ ...other, movement: 2 })) }, unit.id).length).toBeGreaterThanOrEqual(10);
+        expect(getReachableTiles({ ...state, activePlayerId: unit.ownerId, units: state.units.map(other => ({ ...other, movement: 2 })) }, unit.id).length).toBeGreaterThanOrEqual(4);
       }
       const visited = new Set<string>([positionKey(state.units[0])]);
       const queue = [state.units[0] as { x: number; y: number }];
@@ -53,6 +53,12 @@ describe("strategic worlds", () => {
         expect(visited.has(positionKey(city))).toBe(true);
       }
     }
+  });
+  it("preserves wooded start neighborhoods instead of clearing identical grass diamonds", () => {
+    const worlds = Array.from({ length: 12 }, (_, seed) => createGame(String(seed), 8));
+    const neighborhoods = worlds.flatMap(state => state.units.map(unit => state.tiles.filter(tile => Math.abs(tile.x - unit.x) + Math.abs(tile.y - unit.y) <= terrainRules.safeRadius)));
+    expect(neighborhoods.some(tiles => tiles.some(tile => tile.terrain === "forest"))).toBe(true);
+    expect(neighborhoods.every(tiles => tiles.every(tile => Number.isFinite(movementCost[tile.terrain])))).toBe(true);
   });
   it("forms neighboring terrain regions rather than independent scattered tiles", () => {
     const state = createGame("fern-104", 8);

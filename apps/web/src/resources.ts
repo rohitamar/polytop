@@ -65,6 +65,11 @@ export function createResourceLayer(scene: Scene, palette: Palette, point: (posi
       const active = worked.has(positionKey(tile));
       if (active) developed++;
       const p = point(tile);
+      const variation = ((tile.x * 73 + tile.y * 151) % 97) / 97;
+      if (!active) {
+        p.x += (variation - 0.5) * 0.3;
+        p.z += (((tile.x * 137 + tile.y * 47) % 89) / 89 - 0.5) * 0.3;
+      }
       const b = (mat: StandardMaterial, x: number, y: number, z: number, w: number, h: number, d: number) => box(mat, p.x + x, p.y + y, p.z + z, w, h, d);
       const r = (mat: StandardMaterial, x: number, y: number, z: number, w: number, h: number) => roof(mat, p.x + x, p.y + y, p.z + z, w, h);
       if (tile.resource === "orchard") {
@@ -78,7 +83,7 @@ export function createResourceLayer(scene: Scene, palette: Palette, point: (posi
       } else if (tile.resource === "wheat") {
         for (const z of active ? [-0.22, 0, 0.22] : [0]) {
           if (active) b(palette.soil, 0, 0.02, z, 0.67, 0.025, 0.13);
-          for (const x of [-0.18, 0, 0.18]) b(palette.crop, x, active ? 0.11 : 0.09, z, 0.065, active ? 0.20 : 0.15, 0.055);
+          for (const x of active ? [-0.18, 0, 0.18] : [-0.11, 0.08, 0.17]) b(palette.crop, x, active ? 0.11 : 0.07 + variation * 0.05 + x * 0.08, z + (active ? 0 : x * 0.5), 0.045, active ? 0.20 : 0.10, 0.045);
         }
       } else if (tile.resource === "fishery") {
         if (!active) {

@@ -69,7 +69,26 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
     const terrain: Terrain = water(x, y) - coast < rules.waterThreshold ? "water" : mountain(x, y) > rules.mountainThreshold ? "mountain" : forest(x, y) > rules.forestThreshold ? "forest" : "grass";
     tiles.push({ x, y, terrain });
   }
-  const candidates = tiles.filter(tile => tile.x >= rules.safeRadius + 1 && tile.y >= rules.safeRadius + 1 && tile.x < width - rules.safeRadius - 1 && tile.y < height - rules.safeRadius - 1);
+  const interior = tiles.filter(tile => tile.x >= rules.safeRadius + 1 && tile.y >= rules.safeRadius + 1 && tile.x < width - rules.safeRadius - 1 && tile.y < height - rules.safeRadius - 1);
+  const land = new Set<number>();
+  const seen = new Set<number>();
+  for (let index = 0; index < tiles.length; index++) {
+    if (seen.has(index) || !["grass", "forest"].includes(tiles[index].terrain)) continue;
+    const region = [index];
+    seen.add(index);
+    for (let i = 0; i < region.length; i++) {
+      const tile = tiles[region[i]];
+      for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        const x = tile.x + dx, y = tile.y + dy, next = y * width + x;
+        if (x < 0 || y < 0 || x >= width || y >= height || seen.has(next) || !["grass", "forest"].includes(tiles[next].terrain)) continue;
+        seen.add(next);
+        region.push(next);
+      }
+    }
+    if (region.length > land.size) { land.clear(); region.forEach(index => land.add(index)); }
+  }
+  const suitable = interior.filter(tile => tile.terrain === "grass" && land.has(tile.y * width + tile.x) && tiles.filter(other => distance(tile, other) <= rules.safeRadius && ["grass", "forest"].includes(other.terrain)).length >= 11);
+  const candidates = suitable.length >= playerCount + rules.neutralCities ? suitable : interior;
   if (candidates.length < playerCount + rules.neutralCities) throw new Error("Map cannot fit cities with the configured safe radius");
   const random = randomFromSeed(seed + ":starts");
   const first = candidates[Math.floor(random() * candidates.length)];
@@ -77,6 +96,10 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   while (starts.length < playerCount) {
     let best = candidates[0], score = -1;
     for (const tile of candidates) {
+      const separation = Math.min(...starts.map(start => distance(start, tile)));
+      if (separation > score) { best = tile; score = separation; }
+    }
+    if (score < 6) for (const tile of interior) {
       const separation = Math.min(...starts.map(start => distance(start, tile)));
       if (separation > score) { best = tile; score = separation; }
     }
@@ -96,13 +119,40 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   }
   if (config.scenario === "demo") villages.splice(0, villages.length, { x: 5, y: 5 }, { x: 10, y: 7 }, { x: 12, y: 12 }, { x: 7, y: 11 });
   for (const tile of tiles) {
-    if (starts.some(start => distance(start, tile) <= rules.safeRadius) || villages.some(city => distance(city, tile) <= 1)) tile.terrain = "grass";
+    if (config.scenario === "demo") {
+      if (starts.some(start => distance(start, tile) <= rules.safeRadius) || villages.some(city => distance(city, tile) <= 1)) tile.terrain = "grass";
+    } else {
+      const nearStart = starts.some(start => distance(start, tile) <= rules.safeRadius);
+      const center = [...starts, ...villages].some(city => distance(city, tile) === 0);
+      if (center || nearStart && (tile.terrain === "water" || tile.terrain === "mountain")) tile.terrain = "grass";
+    }
   }
   const connect = (from: Position, to: Position) => {
-    let x = from.x, y = from.y;
-    while (x !== to.x || y !== to.y) {
-      if (x !== to.x) x += Math.sign(to.x - x); else y += Math.sign(to.y - y);
-      if (tiles[y * width + x].terrain === "water" || tiles[y * width + x].terrain === "mountain") tiles[y * width + x].terrain = "grass";
+    const costs = new Float64Array(tiles.length).fill(Infinity);
+    const previous = new Int32Array(tiles.length).fill(-1);
+    const start = from.y * width + from.x, target = to.y * width + to.x;
+    const pending = new Set([start]);
+    costs[start] = 0;
+    while (pending.size) {
+      let current = -1;
+      for (const index of pending) if (current < 0 || costs[index] < costs[current]) current = index;
+      pending.delete(current);
+      if (current === target) break;
+      const tile = tiles[current];
+      for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        const x = tile.x + dx, y = tile.y + dy;
+        if (x < 0 || y < 0 || x >= width || y >= height) continue;
+        const index = y * width + x;
+        const terrain = tiles[index].terrain;
+        const cost = costs[current] + (terrain === "water" ? 24 : terrain === "mountain" ? 12 : 1) + forest(x, y) * 0.3;
+        if (cost >= costs[index]) continue;
+        costs[index] = cost;
+        previous[index] = current;
+        pending.add(index);
+      }
+    }
+    for (let index = target; index !== start && index >= 0; index = previous[index]) {
+      if (tiles[index].terrain === "water" || tiles[index].terrain === "mountain") tiles[index].terrain = "grass";
     }
   };
   const connected = [starts[0]];
@@ -119,7 +169,7 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   return { width, height, starts, villages, tiles };
 }
 
-export const resourceRules = { scale: 3, orchardThreshold: 0.32, wheatThreshold: 0.62, fishThreshold: 0.38, metalThreshold: 0.44, minimumCityOpportunities: 3 } as const;
+export const resourceRules = { scale: 3, orchardThreshold: 0.26, wheatThreshold: 0.70, fishThreshold: 0.55, metalThreshold: 0.44, minimumCityOpportunities: 3 } as const;
 export function placeResources(seed: string, tiles: Tile[], width: number, height: number) {
   const fields = noise(seed + ":fields", width, height, resourceRules.scale);
   const deposits = noise(seed + ":deposits", width, height, resourceRules.scale);
