@@ -9,6 +9,8 @@ import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import "@babylonjs/core/Meshes/instancedMesh";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
@@ -50,6 +52,19 @@ export function createWorld(
     preserveDrawingBuffer: true,
   });
   const scene = new Scene(engine);
+  scene.pointerMovePredicate = (mesh) => mesh.isPickable && mesh.isEnabled() && mesh.isVisible;
+  const profile = { frames: [] as { cpu: number; interval: number; draws: number; active: number }[], picks: [] as number[], builds: 0, updates: 0 };
+  let lastFrame = performance.now();
+  if (import.meta.env.DEV) {
+    const pick = scene.pick.bind(scene);
+    scene.pick = (...args: Parameters<Scene["pick"]>) => {
+      const start = performance.now();
+      const result = pick(...args);
+      profile.picks.push(performance.now() - start);
+      if (profile.picks.length > 2000) profile.picks.shift();
+      return result;
+    };
+  }
   scene.clearColor = Color4.FromHexString("#b6d6d9ff");
   scene.ambientColor = Color3.FromHexString("#a4b7ae");
   const camera = new ArcRotateCamera(
@@ -107,6 +122,10 @@ export function createWorld(
   shadows.useBlurExponentialShadowMap = true;
   shadows.blurKernel = 24;
   shadows.setDarkness(0.25);
+  const shadowMap = shadows.getShadowMap()!;
+  shadowMap.refreshRate = 0;
+  let shadowDirty = true;
+  let shadowCamera = "";
   const material = (name: string, color: string, alpha = 1) => {
     const result = new StandardMaterial(name, scene);
     result.diffuseColor = Color3.FromHexString(color);
@@ -148,8 +167,25 @@ export function createWorld(
   const selectionMaterial = material("selection", "#ffe29b");
   selectionMaterial.emissiveColor = Color3.FromHexString("#a87c32");
   const root = new TransformNode("map", scene);
-  let decorations: Mesh[] = [];
-  let markers: Mesh[] = [];
+  let decorations: AbstractMesh[] = [];
+  let markers: AbstractMesh[] = [];
+  let buildingTerrain = false;
+  const terrainSources = new Map<string, Mesh>();
+  const repeated = (key: string, create: () => Mesh) => {
+    if (!buildingTerrain) return create();
+    const source = terrainSources.get(key);
+    if (source) {
+      const instance = source.createInstance(source.name);
+      instance.parent = root;
+      instance.isPickable = false;
+      shadows.addShadowCaster(instance);
+      decorations.push(instance);
+      return instance;
+    }
+    const mesh = create();
+    terrainSources.set(key, mesh);
+    return mesh;
+  };
   let currentState: GameState;
   let selected: string | null = null;
   const cityModels = new Map<
@@ -159,6 +195,7 @@ export function createWorld(
   const neutral = material("neutral city", "#89968e");
   const warriors = new Map<string, TransformNode>();
   const healthLabels = new Map<string, DynamicTexture>();
+  const healthValues = new Map<string, string>();
   let combatAnimating = false;
   const ownerRings = new Map<string, Mesh>();
   const tileHeight = (tile?: Tile) =>
@@ -178,6 +215,7 @@ export function createWorld(
     mesh.material = mat;
     mesh.parent = parent;
     mesh.isPickable = false;
+    if (buildingTerrain) decorations.push(mesh);
     if (cast) shadows.addShadowCaster(mesh);
     return mesh;
   };
@@ -188,7 +226,9 @@ export function createWorld(
     depth: number,
     mat: StandardMaterial,
     parent?: TransformNode,
-  ) => solid(CreateBox(name, { width, height, depth }, scene), mat, parent);
+  ) => mat.alpha < 1
+    ? solid(CreateBox(name, { width, height, depth }, scene), mat, parent)
+    : repeated(`box:${width}:${height}:${depth}:${mat.name}`, () => solid(CreateBox(name, { width, height, depth }, scene), mat, parent));
   const cone = (
     name: string,
     height: number,
@@ -197,13 +237,15 @@ export function createWorld(
     parent?: TransformNode,
     top = 0,
   ) => {
-    const mesh = CreateCylinder(
-      name,
-      { height, diameterBottom: bottom, diameterTop: top, tessellation: 5 },
-      scene,
-    );
-    mesh.convertToFlatShadedMesh();
-    return solid(mesh, mat, parent);
+    return repeated(`cone:${height}:${bottom}:${top}:${mat.name}`, () => {
+      const mesh = CreateCylinder(
+        name,
+        { height, diameterBottom: bottom, diameterTop: top, tessellation: 5 },
+        scene,
+      );
+      mesh.convertToFlatShadedMesh();
+      return solid(mesh, mat, parent);
+    });
   };
   const base = box("floating island", 1, 0.62, 1, earth);
   base.position.y = -0.45;
@@ -315,7 +357,7 @@ export function createWorld(
       info.type !== PointerEventTypes.POINTERTAP
     )
       return;
-    const pick = scene.pick(scene.pointerX, scene.pointerY);
+    const pick = info.pickInfo;
     const metadata = pick?.pickedMesh?.metadata;
     const pickedUnit = currentState?.units.find(
       (unit) => unit.id === metadata?.unitId,
@@ -348,8 +390,11 @@ export function createWorld(
     } else if (tile && (info.event as PointerEvent).button === 0) onClick(tile);
   });
   const rebuild = (state: GameState) => {
+    shadowDirty = true;
+    if (import.meta.env.DEV) profile.builds++;
     for (const mesh of decorations) mesh.dispose();
     decorations = [];
+    terrainSources.clear();
     for (const city of cityModels.values()) city.node.dispose();
     cityModels.clear();
     currentState = state;
@@ -359,8 +404,8 @@ export function createWorld(
     zoom = defaultZoom;
     camera.radius = Math.max(state.width, state.height) * 2.2;
     resize();
+    buildingTerrain = true;
     for (const tile of state.tiles) {
-      const before = new Set(scene.meshes);
       const point = tilePoint(tile);
       const terrain = box(
         `tile-${tile.x}-${tile.y}`,
@@ -418,15 +463,15 @@ export function createWorld(
           );
         }
       }
-      decorations.push(
-        ...(scene.meshes.filter((mesh) => !before.has(mesh)) as Mesh[]),
-      );
     }
+    buildingTerrain = false;
+    for (const mesh of decorations) mesh.freezeWorldMatrix();
     for (const warrior of warriors.values()) warrior.dispose();
     warriors.clear();
     ownerRings.clear();
     for (const texture of healthLabels.values()) texture.dispose();
     healthLabels.clear();
+    healthValues.clear();
     for (const unit of state.units)
       createWarrior(
         unit,
@@ -436,6 +481,8 @@ export function createWorld(
     hoveredKey = "";
   };
   const update = (state: GameState, selectedUnitId: string | null) => {
+    shadowDirty = true;
+    if (import.meta.env.DEV) profile.updates++;
     currentState = state;
     selected = selectedUnitId;
     for (const city of state.cities) {
@@ -474,11 +521,13 @@ export function createWorld(
     }
     for (const unit of state.units) {
       const texture = healthLabels.get(unit.id);
-      if (texture) {
+      const health = `${unit.hp}/${unit.maxHp}`;
+      if (texture && healthValues.get(unit.id) !== health) {
+        healthValues.set(unit.id, health);
         const context = texture.getContext();
         context.clearRect(0, 0, 256, 96);
         texture.drawText(
-          `${unit.hp}/${unit.maxHp}`,
+          health,
           null,
           68,
           "bold 60px sans-serif",
@@ -593,6 +642,7 @@ export function createWorld(
       ownerRings.delete(unit.id);
       healthLabels.get(unit.id)?.dispose();
       healthLabels.delete(unit.id);
+      healthValues.delete(unit.id);
     }
     if (result.advance) await move(result.attackerId, [result.advance]);
     for (const unit of after.units) {
@@ -622,6 +672,11 @@ export function createWorld(
   resize();
   engine.runRenderLoop(() => {
     const now = performance.now();
+    const cameraKey = `${camera.alpha}:${camera.beta}:${zoom}:${canvas.width}:${canvas.height}`;
+    if (cameraKey !== shadowCamera || animation || combatAnimating) shadowDirty = true;
+    shadowCamera = cameraKey;
+    if (shadowDirty) shadowMap.resetRefreshCounter();
+    shadowDirty = animation !== null || combatAnimating;
     if (animation) {
       const warrior = warriors.get(animation.unitId)!;
       const elapsed = (now - animation.started) / 440;
@@ -647,9 +702,18 @@ export function createWorld(
         selectedWarrior.position.add(new Vector3(0, 0.025, 0)),
       );
     halo.scaling.setAll(1 + Math.sin(now / 330) * 0.025);
+    const renderStart = performance.now();
+    if (import.meta.env.DEV) engine._drawCalls.fetchNewFrame();
     scene.render();
+    if (import.meta.env.DEV) {
+      profile.frames.push({ cpu: performance.now() - renderStart, interval: now - lastFrame, draws: engine._drawCalls.current, active: scene.getActiveMeshes().length });
+      if (profile.frames.length > 2000) profile.frames.shift();
+    }
+    lastFrame = now;
   });
   return {
+    getProfile: () => ({ ...profile, meshes: scene.meshes.length, materials: scene.materials.length, loops: engine.activeRenderLoops.length }),
+    resetProfile: () => { profile.frames.length = 0; profile.picks.length = 0; },
     rebuild,
     update,
     move,

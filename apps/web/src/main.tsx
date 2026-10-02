@@ -53,13 +53,15 @@ function Icon({
 }
 
 function App() {
+  const renders = useRef(0);
+  if (import.meta.env.DEV) renders.current++;
   const canvas = useRef<HTMLCanvasElement>(null);
   const world = useRef<World | null>(null);
-  const stateRef = useRef(createGame());
+  const [state, setState] = useState<GameState>(() => createGame());
+  const stateRef = useRef(state);
   const selection = useRef<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const busy = useRef(false);
-  const [state, setState] = useState<GameState>(stateRef.current);
   const city = state.cities.find((city) => city.id === selectedCityId);
   const [selected, setSelected] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
@@ -293,6 +295,8 @@ function App() {
           return unit;
         };
         window.__GAME_DEBUG__ = {
+          getProfile: () => ({ ...instance.getProfile(), reactRenders: renders.current }),
+          resetProfile: instance.resetProfile,
           getState: () => structuredClone(stateRef.current),
           getUnits: () => structuredClone(stateRef.current.units),
           getActivePlayer: () =>

@@ -8,6 +8,8 @@ import type {
 } from "@reach/game-core";
 
 export interface GameDebug {
+  getProfile(): { frames: { cpu: number; interval: number; draws: number; active: number }[]; picks: number[]; builds: number; updates: number; meshes: number; materials: number; loops: number; reactRenders: number };
+  resetProfile(): void;
   getState(): GameState;
   getUnits(): Unit[];
   getActivePlayer(): Player;
