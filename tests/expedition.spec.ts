@@ -18,7 +18,7 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
   await page.evaluate(() => window.__GAME_DEBUG__!.setSeed("fern-104"));
   await expect(
-    page.getByRole("heading", { name: "Beyond the familiar." }),
+    page.getByRole("link", { name: "react-polytop home" }),
   ).toBeVisible();
   const unitPoint = await page.evaluate(() =>
     window.__GAME_DEBUG__!.getUnitScreenPosition(),

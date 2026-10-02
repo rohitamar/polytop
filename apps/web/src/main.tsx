@@ -330,13 +330,12 @@ function App() {
       />
       <header className="topbar">
         <Lobby />
-        <a className="brand" href="/" aria-label="Verdant Reach home">
+        <a className="brand" href="/" aria-label="react-polytop home">
           <span className="brand-mark">
             <Icon name="compass" />
           </span>
           <span>
-            VERDANT <b>REACH</b>
-            <small>A WORLD WORTH EXPLORING</small>
+            react-polytop
           </span>
         </a>
         <div className="chapter">
@@ -351,25 +350,6 @@ function App() {
           ?
         </button>
       </header>
-      <section className="intro">
-        <div className="eyebrow">THE FIRST FOOTSTEPS</div>
-        <h1>
-          Beyond the
-          <br />
-          <em>familiar.</em>
-        </h1>
-        <p>
-          An untouched island.
-          <br />
-          Two companies. A world of possibility.
-        </p>
-        <div className="map-label">
-          <span /> THE FERN ISLES{" "}
-          <small>
-            {state.width} × {state.height}
-          </small>
-        </div>
-      </section>
       <aside className="expedition-card">
         <div className="eyebrow">
           <Icon name="flag" /> CURRENT TURN{" "}
