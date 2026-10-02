@@ -5,7 +5,7 @@ import {
   applyAction,
   economy,
   getCityPopulation,
-  getWorkableTiles,
+  getCityProduction,
   getProduction,
   positionKey,
   type GameAction,
@@ -22,6 +22,7 @@ import {
   type Tile,
 } from "@reach/game-core";
 import { createWorld, type World } from "./world";
+import { opportunityNames, developedNames } from "./resources";
 import { playerStyle } from "./player-style";
 import { Lobby } from "./lobby";
 import "./debug";
@@ -99,11 +100,13 @@ function App() {
       stateRef.current = next;
       setState(next);
       clearTarget();
-      selection.current = null;
-      setSelected(null);
-      setSelectedCityId(null);
+      if (!message.action || ["END_TURN", "move", "ATTACK_UNIT"].includes(message.action.type)) {
+        selection.current = null;
+        setSelected(null);
+        setCitySelection(null);
+      }
       if (!message.action) world.current?.rebuild(next);
-      world.current?.update(next, null);
+      world.current?.update(next, selection.current);
       if (message.action?.type === "move") {
         const action = message.action;
         const destination = getReachableTiles(previous, action.unitId).find(tile => tile.x === action.to.x && tile.y === action.to.y);
@@ -111,7 +114,7 @@ function App() {
       } else if (message.action?.type === "ATTACK_UNIT") {
         await world.current?.combat(previous, next, previewCombat(previous, message.action.unitId, message.action.targetId));
       }
-      world.current?.update(next, null);
+      world.current?.update(next, selection.current);
       busy.current = false;
       setMoving(false);
       setNotice(`${next.players.find(player => player.id === next.activePlayerId)!.name}'s turn.`);
@@ -123,8 +126,15 @@ function App() {
   };
   const selection = useRef<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
+  const citySelection = useRef<string | null>(null);
+  const [resourceTile, setResourceTile] = useState<Position | null>(null);
+  const setCitySelection = (id: string | null) => {
+    citySelection.current = id;
+    setSelectedCityId(id);
+    setResourceTile(null);
+  };
   const busy = useRef(false);
-  useEffect(() => { world.current?.selectCity(selectedCityId); }, [selectedCityId, state]);
+  useEffect(() => { world.current?.selectCity(selectedCityId); world.current?.selectResource(resourceTile); }, [selectedCityId, resourceTile, state]);
   const city = state.cities.find((city) => city.id === selectedCityId);
   const [selected, setSelected] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
@@ -177,7 +187,7 @@ function App() {
     )
       return;
     clearTarget();
-    setSelectedCityId(null);
+    setCitySelection(null);
     selection.current = value;
     setBlockedOwner(null);
     setSelected(value);
@@ -262,6 +272,13 @@ function App() {
     const click = async (position: Position) => {
       if (busy.current) return;
       const current = stateRef.current;
+      const resource = getTile(current, position.x, position.y);
+      if (!selection.current && resource?.resource && !current.units.some(unit => positionKey(unit) === positionKey(position)) && !current.cities.some(city => positionKey(city) === positionKey(position))) {
+        if (!citySelection.current) setCitySelection(getTileTerritory(current, position.x, position.y)?.cityId ?? null);
+        setResourceTile({ x: position.x, y: position.y });
+        clearTarget();
+        return;
+      }
       if (networkMatch.current && (!connectionReady.current || network.current?.playerId !== current.activePlayerId)) { setNotice("Wait for your turn."); return; }
       const clickedCity = current.cities.find(
         (city) => city.x === position.x && city.y === position.y,
@@ -283,7 +300,7 @@ function App() {
             return;
           }
           select(null);
-          setSelectedCityId(clickedCity?.id ?? null);
+          setCitySelection(clickedCity?.id ?? null);
           const owner = current.players.find(
             (player) => player.id === clickedUnit.ownerId,
           )!;
@@ -292,7 +309,7 @@ function App() {
           return;
         }
         select(clickedUnit.id);
-        setSelectedCityId(clickedCity?.id ?? null);
+        setCitySelection(clickedCity?.id ?? null);
         setNotice(
           clickedUnit.movement
             ? "Choose a highlighted tile to move."
@@ -305,7 +322,7 @@ function App() {
         (unit) => unit.id === selection.current,
       );
       if (!warrior) {
-        setSelectedCityId(clickedCity?.id ?? null);
+        setCitySelection(clickedCity?.id ?? null);
         return;
       }
       const destination = getReachableTiles(current, warrior.id).find(
@@ -314,7 +331,7 @@ function App() {
       if (!destination) {
         if (clickedCity) {
           select(null);
-          setSelectedCityId(clickedCity.id);
+          setCitySelection(clickedCity.id);
           return;
         }
         setNotice("Beyond your reach. Choose a highlighted tile.");
@@ -338,7 +355,7 @@ function App() {
       busy.current = false;
       setMoving(false);
       world.current!.update(next, warrior.id);
-      setSelectedCityId(clickedCity?.id ?? null);
+      setCitySelection(clickedCity?.id ?? null);
       setNotice(
         next.units.find((unit) => unit.id === warrior.id)!.movement
           ? "New ground, new possibilities. One step remains."
@@ -366,6 +383,8 @@ function App() {
           getProfile: () => ({ ...instance.getProfile(), reactRenders: renders.current }),
           resetProfile: instance.resetProfile,
           getTerritoryRenderStats: instance.getTerritoryRenderStats,
+          getResourceRenderStats: instance.getResourceRenderStats,
+          getSelectedResource: () => instance.getResourceRenderStats().selectedTile,
           getTerritory: () => getTerritory(stateRef.current),
           getTileTerritory: (x, y) => getTileTerritory(stateRef.current, x, y),
           getState: () => structuredClone(stateRef.current),
@@ -422,6 +441,26 @@ function App() {
     };
   }, []);
 
+  const treasuryPlayer = state.players.find(player => player.id === network.current?.playerId) ?? activePlayer;
+  const production = getProduction(state, treasuryPlayer.id);
+  const population = city ? getCityPopulation(state, city) : null;
+  const cityProduction = city ? getCityProduction(state, city.id) : null;
+  const cityName = (cityId: string | null | undefined) => {
+    const controlled = state.cities.find(city => city.id === cityId);
+    if (!controlled) return "Unclaimed land";
+    const player = state.players.find(player => player.id === controlled.ownerId);
+    return player ? `${player.name} · ${controlled.id.startsWith("neutral-") ? "Village" : "City"} ${controlled.id.split("-").at(-1)}` : `Neutral village ${controlled.id.replace("neutral-", "")}`;
+  };
+  const resource = resourceTile ? getTile(state, resourceTile.x, resourceTile.y) : undefined;
+  const claim = resource ? getTileTerritory(state, resource.x, resource.y) : undefined;
+  const resourceCity = state.cities.find(city => city.id === claim?.cityId);
+  const worked = !!resource && !!resourceCity?.workedTiles.includes(positionKey(resource));
+  const yieldRule = resource?.resource ? economy.yields[resource.resource] : undefined;
+  const canWork = !!resourceCity && resourceCity.id === city?.id && resourceCity.ownerId === activePlayer.id && canAct;
+  const hoverClaim = hovered ? getTileTerritory(state, hovered.x, hovered.y) : undefined;
+  const hoverCity = state.cities.find(city => city.id === hoverClaim?.cityId);
+  const hoverWorked = !!hovered && !!hoverCity?.workedTiles.includes(positionKey(hovered));
+
   return (
     <main>
       <canvas
@@ -454,82 +493,65 @@ function App() {
           ?
         </button>
       </header>
-      <aside className="expedition-card">
-        <div className="eyebrow">
-          <Icon name="flag" /> CURRENT TURN{" "}
-          <span data-testid="turn-number">{state.turnNumber}</span>
-        </div>
-        <div className="player-line">
-          <span
-            className="player-avatar"
-            style={{ background: playerStyle(activePlayerIndex).accent }}
-          >
-            {activePlayer.name[0]}
-          </span>
-          <div>
-            <strong data-testid="active-player">
-              The {activePlayer.name} Company
-            </strong>
-            <small>Player {activePlayerIndex + 1} · {networked ? (canAct ? "Your turn" : "Waiting for your turn") : "Local pass-and-play"}</small>
-          </div>
-          <span className="player-dot" />
-        </div>
-        <div className="card-rule" />
+      <section className="treasury-bar" aria-label="Civilization resources">
+        <span className="treasury-name">{treasuryPlayer.name} treasury</span>
         {(["gold", "food", "wood", "steel"] as const).map(resource => (
-          <div className="stat-row" key={resource}>
+          <div className="treasury-resource" key={resource}>
             <span>{resource[0].toUpperCase() + resource.slice(1)}</span>
-            <b data-testid={resource}>{activePlayer.resources[resource]} <i> / +{getProduction(state, activePlayer.id)[resource]} per turn</i></b>
+            <b data-testid={resource}>{treasuryPlayer.resources[resource]} <small>+{production[resource]}/turn</small></b>
           </div>
         ))}
-        {city && (
-          <div className="city-info" aria-label="Selected city">
-            <div className="card-rule" />
-            <div className="eyebrow">CITY · {state.players.find(player => player.id === city.ownerId)?.name ?? "Neutral"}</div>
-            <div className="stat-row"><span>Town Hall</span><b data-testid="town-hall">{city.townHallLevel} / {economy.maxLevel}</b></div>
-            <div className="stat-row"><span>Population</span><b data-testid="population">{city.population} / {getCityPopulation(state, city).cap}</b></div>
-            <div className="stat-row"><span>Civilians / military</span><b>{getCityPopulation(state, city).civilian} / {getCityPopulation(state, city).military}</b></div>
-            <div className="stat-row"><span>Available civilians</span><b>{getCityPopulation(state, city).available}</b></div>
-            <div className="stat-row"><span>Town Hall income</span><b>+{economy.goldIncome[city.townHallLevel - 1]} Gold</b></div>
-            {city.ownerId === activePlayer.id && <>
-              <button disabled={moving || waiting || !canAct || city.population >= getCityPopulation(state, city).cap || activePlayer.resources.food < economy.growthCost}
-                onClick={() => cityAction({ type: "GROW_POPULATION", playerId: activePlayer.id, cityId: city.id })}>Grow Population · {economy.growthCost} Food</button>
-              {getUpgradeCost(city) !== null ? <button disabled={moving || waiting || !canAct || activePlayer.resources.gold < getUpgradeCost(city)!}
-                onClick={() => cityAction({ type: "UPGRADE_TOWN_HALL", playerId: activePlayer.id, cityId: city.id })}>Upgrade Town Hall · {getUpgradeCost(city)} Gold</button> : <p>Maximum Town Hall level</p>}
-            </>}
-            <p>Resource tiles · 1 civilian per worked tile</p>
-            <div className="worker-list">
-              {getWorkableTiles(state, city.id).map(tile => {
-                const worked = city.workedTiles.includes(positionKey(tile));
-                const yieldRule = economy.yields[tile.resource!];
-                return <div className={`worker-tile ${worked ? "worked" : ""}`} key={positionKey(tile)}>
-                  <span>{tile.resource} ({tile.x + 1}, {tile.y + 1})<small>{worked ? "Worked" : "Unworked"} · +{yieldRule.amount} {yieldRule.resource} per turn when worked</small></span>
-                  {city.ownerId === activePlayer.id && <button aria-label={`${worked ? "Remove" : "Assign"} worker ${positionKey(tile)}`}
-                    disabled={moving || waiting || !canAct || (!worked && getCityPopulation(state, city).available <= 0)}
-                    onClick={() => cityAction({ type: worked ? "UNASSIGN_WORKER" : "ASSIGN_WORKER", playerId: activePlayer.id, cityId: city.id, tile })}>{worked ? "Remove" : "Assign"}</button>}
-                </div>;
-              })}
-            </div>
+      </section>
+      <aside className="expedition-card" aria-label="Current player">
+        <div className="eyebrow"><Icon name="flag" /> CURRENT TURN <span data-testid="turn-number">{state.turnNumber}</span></div>
+        <div className="player-line">
+          <span className="player-avatar" style={{ background: playerStyle(activePlayerIndex).accent }}>{activePlayer.name[0]}</span>
+          <div>
+            <strong data-testid="active-player">The {activePlayer.name} Company</strong>
+            <small>Player {activePlayerIndex + 1} · {networked ? canAct ? "Your turn" : "Waiting for your turn" : "Local pass-and-play"}</small>
           </div>
-        )}
-        <div className="stat-row">
-          <span>Warriors</span>
-          <b>{activeUnits.length}</b>
         </div>
-        <div className="stat-row">
-          <span>Movement available</span>
-          <b>
-            {availableMovement}
-            <i> / {maximumMovement}</i>
-          </b>
-        </div>
-        <div className="movement-track">
-          <span
-            style={{
-              width: `${maximumMovement ? (availableMovement / maximumMovement) * 100 : 0}%`,
-            }}
-          />
-        </div>
+        <div className="turn-summary">{activeUnits.length} warrior{activeUnits.length === 1 ? "" : "s"} · {availableMovement}/{maximumMovement} movement</div>
       </aside>
+      {city && population && cityProduction && (
+        <section className="city-panel" aria-label="Selected city">
+          <div className="panel-heading"><span className="eyebrow">CITY TERRITORY</span><button aria-label="Close city" disabled={moving || waiting} onClick={() => select(null)}>×</button></div>
+          <h2>{cityName(city.id)}</h2>
+          <div className="city-stats">
+            <div><span>Town Hall</span><b data-testid="town-hall">{city.townHallLevel} / {economy.maxLevel}</b></div>
+            <div><span>Population</span><b data-testid="population">{population.total} / {population.cap}</b></div>
+            <div><span>Civilians / military</span><b>{population.civilian} / {population.military}</b></div>
+            <div><span>Available civilians</span><b data-testid="available-civilians">{population.available}</b></div>
+          </div>
+          <div className="city-income" aria-label="City production">
+            {(["gold", "food", "wood", "steel"] as const).map(resource => <span key={resource}>+{cityProduction[resource]} {resource[0].toUpperCase() + resource.slice(1)}</span>)}
+          </div>
+          {city.ownerId === treasuryPlayer.id && <div className="city-actions">
+            <button disabled={moving || waiting || !canAct || population.total >= population.cap || activePlayer.resources.food < economy.growthCost}
+              onClick={() => cityAction({ type: "GROW_POPULATION", playerId: activePlayer.id, cityId: city.id })}>Grow Population · {economy.growthCost} Food</button>
+            {getUpgradeCost(city) !== null ? <button disabled={moving || waiting || !canAct || activePlayer.resources.gold < getUpgradeCost(city)!}
+              onClick={() => cityAction({ type: "UPGRADE_TOWN_HALL", playerId: activePlayer.id, cityId: city.id })}>Upgrade Town Hall · {getUpgradeCost(city)} Gold</button> : <p>Maximum Town Hall level</p>}
+          </div>}
+          {selected ? <button className="manage-resources" disabled={moving || waiting} onClick={() => { select(null); setCitySelection(city.id); setNotice("Click a resource inside this city's border to manage civilians."); }}>Manage resources</button> : <p className="city-hint">Click a marked resource inside this city's border. One civilian works one tile.</p>}
+        </section>
+      )}
+      {resource?.resource && yieldRule && (
+        <section className="resource-panel" aria-label="Resource tile">
+          <div className="panel-heading"><span className="eyebrow">RESOURCE TILE</span><button aria-label="Close resource" disabled={moving || waiting} onClick={() => setResourceTile(null)}>×</button></div>
+          <h2>{worked ? developedNames[resource.resource] : opportunityNames[resource.resource]}</h2>
+          <span className={`resource-state ${worked ? "worked" : ""}`}>{worked ? "Worked" : "Unworked"}</span>
+          <p className="resource-yield">+{yieldRule.amount} {yieldRule.resource[0].toUpperCase() + yieldRule.resource.slice(1)}/turn{worked ? "" : " when worked"}</p>
+          <p className="resource-owner">{claim?.cityId ? `Controlled by ${cityName(claim.cityId)}` : "Unclaimed land"}</p>
+          {canWork ? <>
+            <button className="worker-action" disabled={moving || waiting || !worked && getCityPopulation(state, resourceCity!).available <= 0}
+              onClick={() => cityAction({ type: worked ? "UNASSIGN_WORKER" : "ASSIGN_WORKER", playerId: activePlayer.id, cityId: resourceCity!.id, tile: resource })}>{worked ? "Unassign Civilian" : "Assign Civilian"}</button>
+            {!worked && getCityPopulation(state, resourceCity!).available <= 0 && <small>No available civilians. Grow the city or unassign another tile.</small>}
+          </> : <>
+            <p className="resource-restriction">{!resourceCity?.ownerId ? "Capture this territory before assigning civilians." : resourceCity.ownerId !== treasuryPlayer.id ? "This territory belongs to another player." : resourceCity.id !== city?.id ? "Select the controlling city to manage this tile." : "Assignment is available on your turn."}</p>
+            {resourceCity && resourceCity.id !== city?.id && <button className="worker-action" disabled={moving || waiting} onClick={() => { select(null); setCitySelection(resourceCity.id); setResourceTile(resource); }}>Select controlling city</button>}
+          </>}
+        </section>
+      )}
       <div className={`map-tools ${city ? "city-open" : ""}`}>
         <span className="north">
           N<Icon name="compass" />
@@ -546,10 +568,11 @@ function App() {
         {hovered ? (
           <>
             <span className={`terrain-dot ${hovered.terrain}`} />
-            <strong>{hovered.terrain}</strong>
+            <strong>{hovered.resource ? hoverWorked ? developedNames[hovered.resource] : opportunityNames[hovered.resource] : hovered.terrain}</strong>
             <span>
               {hovered.x + 1}, {hovered.y + 1}
             </span>
+            {hovered.resource && <><span>{hoverWorked ? "Worked" : "Unworked"}</span><small>+{economy.yields[hovered.resource].amount} {economy.yields[hovered.resource].resource}/turn{hoverWorked ? "" : " when worked"} · {cityName(hoverClaim?.cityId)}</small></>}
             <small>
               {hovered.terrain === "grass"
                 ? "1 movement"
@@ -714,7 +737,7 @@ function App() {
           </p>
           <p>
             Enter a city to claim it. Click a city to inspect or upgrade it.
-            Town Halls generate Gold. Assign civilians to resource tiles, then spend Food to grow population or Gold to upgrade the Town Hall.
+            Town Halls generate Gold. Choose Manage resources in the city panel, then click a resource tile to assign a civilian. Spend Food to grow population or Gold to upgrade the Town Hall.
           </p>
           <ul>
             <li>Grass costs 1 point.</li>

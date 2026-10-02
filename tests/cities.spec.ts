@@ -9,13 +9,21 @@ test("work tiles, collect resources, grow population and upgrade Town Hall", asy
     const point = await page.evaluate(() => window.__GAME_DEBUG__!.getUnitScreenPosition("warrior-1"));
     await page.mouse.click(point.x, point.y);
     await expect(page.getByTestId("population")).toBeVisible();
+    await page.getByRole("button", { name: "Manage resources", exact: true }).click();
   };
   await selectCity();
   await expect(page.getByTestId("population")).toHaveText("3 / 5");
   await expect(page.getByText("Civilians / military")).toBeVisible();
-  await page.getByRole("button", { name: "Assign worker 4,3", exact: true }).click();
+  const tile = async (x: number, y: number) => {
+    const point = await page.evaluate(({ x, y }) => window.__GAME_DEBUG__!.getTileScreenPosition(x, y), { x, y });
+    await page.mouse.click(point.x, point.y);
+    await expect(page.getByRole("region", { name: "Resource tile", exact: true })).toBeVisible();
+  };
+  await tile(4, 3);
+  await page.getByRole("button", { name: "Assign Civilian", exact: true }).click();
   expect(await page.evaluate(() => window.__GAME_DEBUG__!.getState().cities[0].workedTiles)).toEqual(["4,3"]);
-  await page.getByRole("button", { name: "Assign worker 4,4", exact: true }).click();
+  await tile(4, 4);
+  await page.getByRole("button", { name: "Assign Civilian", exact: true }).click();
   const turn = page.getByRole("button", { name: "End Turn", exact: true });
   await turn.click();
   await turn.click();
@@ -33,7 +41,8 @@ test("work tiles, collect resources, grow population and upgrade Town Hall", asy
   const state = await page.evaluate(() => window.__GAME_DEBUG__!.getState());
   expect(state.players[0].resources).toEqual({ gold: 2, food: 2, wood: 4, steel: 0 });
   expect(state.units[0]).toMatchObject({ homeCityId: "city-1", populationCost: 1 });
-  await page.getByRole("button", { name: "Remove worker 4,3", exact: true }).click();
+  await tile(4, 3);
+  await page.getByRole("button", { name: "Unassign Civilian", exact: true }).click();
   expect(await page.evaluate(() => window.__GAME_DEBUG__!.getState().cities[0].workedTiles)).toEqual(["4,4"]);
   await turn.click();
   await turn.click();

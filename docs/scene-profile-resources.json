@@ -1,0 +1,288 @@
+{
+  "gpu": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "seed": "fern-104",
+  "worlds": [
+    {
+      "players": 2,
+      "width": 20,
+      "height": 20,
+      "buildMs": 33,
+      "samples": {
+        "idle": {
+          "meshes": 1460,
+          "materials": 42,
+          "draws": {
+            "mean": 92,
+            "p95": 92
+          },
+          "cpuMs": {
+            "mean": 2.2488888887067637,
+            "p95": 2.599999997764826
+          },
+          "intervalMs": {
+            "mean": 37.425925925925924,
+            "p95": 39
+          },
+          "pickMs": null,
+          "frames": 135,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 3,
+          "resourceBuilds": 0,
+          "resources": {
+            "builds": 2,
+            "meshes": 6,
+            "opportunities": 218,
+            "developed": 0,
+            "selectedTile": null
+          }
+        },
+        "hover": {
+          "meshes": 1460,
+          "materials": 42,
+          "draws": {
+            "mean": 92.99009900990099,
+            "p95": 93
+          },
+          "cpuMs": {
+            "mean": 2.206930692796365,
+            "p95": 2.7999999970197678
+          },
+          "intervalMs": {
+            "mean": 39.07920792079208,
+            "p95": 41.600000001490116
+          },
+          "pickMs": {
+            "mean": 0.4480000000447035,
+            "p95": 0.5999999977648258
+          },
+          "frames": 101,
+          "loops": 1,
+          "reactRenders": 40,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 3,
+          "resourceBuilds": 0,
+          "resources": {
+            "builds": 2,
+            "meshes": 6,
+            "opportunities": 218,
+            "developed": 0,
+            "selectedTile": null
+          }
+        },
+        "selected": {
+          "meshes": 1486,
+          "materials": 42,
+          "draws": {
+            "mean": 120,
+            "p95": 120
+          },
+          "cpuMs": {
+            "mean": 2.3515384614467623,
+            "p95": 2.699999999254942
+          },
+          "intervalMs": {
+            "mean": 38.753846153846155,
+            "p95": 40.099999997764826
+          },
+          "pickMs": null,
+          "frames": 130,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 4,
+          "resourceBuilds": 0,
+          "resources": {
+            "builds": 2,
+            "meshes": 7,
+            "opportunities": 218,
+            "developed": 0,
+            "selectedTile": null
+          }
+        },
+        "developed": {
+          "meshes": 1463,
+          "materials": 42,
+          "draws": {
+            "mean": 96,
+            "p95": 96
+          },
+          "cpuMs": {
+            "mean": 2.2368421052071383,
+            "p95": 2.400000002235174
+          },
+          "intervalMs": {
+            "mean": 37.75413533835147,
+            "p95": 38.80000000074506
+          },
+          "pickMs": null,
+          "frames": 133,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 4,
+          "resourceBuilds": 0,
+          "resources": {
+            "builds": 3,
+            "meshes": 8,
+            "opportunities": 218,
+            "developed": 1,
+            "selectedTile": "12,9"
+          }
+        }
+      }
+    },
+    {
+      "players": 8,
+      "width": 30,
+      "height": 30,
+      "buildMs": 54.19999999925494,
+      "samples": {
+        "idle": {
+          "meshes": 3005,
+          "materials": 50,
+          "draws": {
+            "mean": 212,
+            "p95": 212
+          },
+          "cpuMs": {
+            "mean": 3.9635416669383026,
+            "p95": 4.300000000745058
+          },
+          "intervalMs": {
+            "mean": 52.314583333364375,
+            "p95": 54.099999997764826
+          },
+          "pickMs": null,
+          "frames": 96,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 9,
+          "resourceBuilds": 0,
+          "resources": {
+            "builds": 4,
+            "meshes": 6,
+            "opportunities": 527,
+            "developed": 0,
+            "selectedTile": null
+          }
+        },
+        "hover": {
+          "meshes": 3005,
+          "materials": 50,
+          "draws": {
+            "mean": 212.990099009901,
+            "p95": 213
+          },
+          "cpuMs": {
+            "mean": 3.645544554374301,
+            "p95": 3.899999998509884
+          },
+          "intervalMs": {
+            "mean": 54.96732673266589,
+            "p95": 57.399999998509884
+          },
+          "pickMs": {
+            "mean": 0.8559999999031425,
+            "p95": 1
+          },
+          "frames": 101,
+          "loops": 1,
+          "reactRenders": 60,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 9,
+          "resourceBuilds": 0,
+          "resources": {
+            "builds": 4,
+            "meshes": 6,
+            "opportunities": 527,
+            "developed": 0,
+            "selectedTile": null
+          }
+        },
+        "selected": {
+          "meshes": 3031,
+          "materials": 50,
+          "draws": {
+            "mean": 240,
+            "p95": 240
+          },
+          "cpuMs": {
+            "mean": 4.369892473262484,
+            "p95": 5.300000000745058
+          },
+          "intervalMs": {
+            "mean": 54.33225806450011,
+            "p95": 56.399999998509884
+          },
+          "pickMs": null,
+          "frames": 93,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 10,
+          "resourceBuilds": 0,
+          "resources": {
+            "builds": 4,
+            "meshes": 7,
+            "opportunities": 527,
+            "developed": 0,
+            "selectedTile": null
+          }
+        },
+        "developed": {
+          "meshes": 3008,
+          "materials": 50,
+          "draws": {
+            "mean": 216,
+            "p95": 216
+          },
+          "cpuMs": {
+            "mean": 4.2894736840928855,
+            "p95": 4.800000000745058
+          },
+          "intervalMs": {
+            "mean": 53.140000000007845,
+            "p95": 54.69999999925494
+          },
+          "pickMs": null,
+          "frames": 95,
+          "loops": 1,
+          "reactRenders": 0,
+          "builds": 0,
+          "updates": 0,
+          "territoryBuilds": 0,
+          "territoryMeshes": 10,
+          "resourceBuilds": 0,
+          "resources": {
+            "builds": 5,
+            "meshes": 8,
+            "opportunities": 527,
+            "developed": 1,
+            "selectedTile": "22,15"
+          }
+        }
+      }
+    }
+  ]
+}

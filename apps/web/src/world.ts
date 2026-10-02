@@ -41,6 +41,7 @@ import {
   type Tile,
   type Unit,
 } from "@reach/game-core";
+import { createResourceLayer } from "./resources";
 import { playerStyle } from "./player-style";
 
 export type World = ReturnType<typeof createWorld>;
@@ -252,6 +253,14 @@ export function createWorld(
       return solid(mesh, mat, parent);
     });
   };
+  const resourceLayer = createResourceLayer(scene, {
+    wood: bark, leaf: leaves[1], fruit: material("fruit", "#d8794e"), crop: gold, soil: earth, stone: rock, dark, ivory: armor,
+  }, tilePoint, (mesh, mat, cast) => {
+    solid(mesh, mat, root, cast);
+    if (cast) mesh.onDisposeObservable.add(() => shadows.removeShadowCaster(mesh));
+    shadowDirty = true;
+  });
+  let selectedResource: Position | null = null;
   const base = box("floating island", 1, 0.62, 1, earth);
   base.position.y = -0.45;
   const bottom = box("island foundation", 1, 0.22, 1, dark);
@@ -553,12 +562,14 @@ export function createWorld(
       territoryMeshes.push(mesh);
     }
   };
-  const selectCity = (cityId: string | null) => { selectedCity = cityId; updateTerritory(currentState, cityId); };
+  const selectCity = (cityId: string | null) => { selectedCity = cityId; updateTerritory(currentState, cityId); resourceLayer.select(currentState, cityId, selectedResource); };
   const update = (state: GameState, selectedUnitId: string | null) => {
     shadowDirty = true;
     if (import.meta.env.DEV) profile.updates++;
     currentState = state;
     updateTerritory(state, selectedCity);
+    resourceLayer.update(state);
+    resourceLayer.select(state, selectedCity, selectedResource);
     selected = selectedUnitId;
     for (const city of state.cities) {
       const signature = `${city.ownerId}:${city.townHallLevel}`;
@@ -788,6 +799,8 @@ export function createWorld(
   });
   return {
     selectCity,
+    selectResource: (tile: Position | null) => { selectedResource = tile; resourceLayer.select(currentState, selectedCity, tile); },
+    getResourceRenderStats: resourceLayer.stats,
     getTerritoryRenderStats: () => ({ builds: territoryBuilds, meshes: territoryMeshes.length, quads: territoryMeshes.reduce((sum, mesh) => sum + mesh.getTotalVertices() / 4, 0), selectedCityId: selectedCity }),
     getProfile: () => ({ ...profile, meshes: scene.meshes.length, materials: scene.materials.length, loops: engine.activeRenderLoops.length }),
     resetProfile: () => { profile.frames.length = 0; profile.picks.length = 0; },

@@ -118,3 +118,24 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   }
   return { width, height, starts, villages, tiles };
 }
+
+export const resourceRules = { scale: 3, orchardThreshold: 0.32, wheatThreshold: 0.62, fishThreshold: 0.38, metalThreshold: 0.44, minimumCityOpportunities: 3 } as const;
+export function placeResources(seed: string, tiles: Tile[], width: number, height: number) {
+  const fields = noise(seed + ":fields", width, height, resourceRules.scale);
+  const deposits = noise(seed + ":deposits", width, height, resourceRules.scale);
+  const neighbors = (tile: Tile) => [[0, -1], [1, 0], [0, 1], [-1, 0]].flatMap(([dx, dy]) => {
+    const x = tile.x + dx, y = tile.y + dy;
+    return x < 0 || y < 0 || x >= width || y >= height ? [] : [tiles[y * width + x]];
+  });
+  for (const tile of tiles) {
+    const nearby = neighbors(tile);
+    const value = fields(tile.x, tile.y);
+    if (tile.terrain === "forest") tile.resource = "forest";
+    else if (tile.terrain === "water" && nearby.some(other => other.terrain !== "water") && value > resourceRules.fishThreshold) tile.resource = "fishery";
+    else if (tile.terrain === "grass") {
+      if (nearby.some(other => other.terrain === "mountain") && deposits(tile.x, tile.y) > resourceRules.metalThreshold) tile.resource = "mine";
+      else if (value < resourceRules.orchardThreshold) tile.resource = "orchard";
+      else if (value > resourceRules.wheatThreshold) tile.resource = "wheat";
+    }
+  }
+}

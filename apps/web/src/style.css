@@ -846,48 +846,91 @@ footer i {
   }
 }
 
-.city-info {
-  margin-top: 12px;
+.topbar { height: 76px; padding: 0 24px; }
+.lobby-shell { top: 17px; left: auto; right: 80px; transform: none; }
+.lobby-panel { left: auto; right: 0; transform: none; top: 48px; }
+.chapter { margin-left: auto; margin-right: 210px; }
+.expedition-card { top: 92px; right: 24px; width: 248px; padding: 15px; max-height: none; overflow: visible; }
+.expedition-card .player-line { margin-top: 12px; }
+.turn-summary { margin-top: 10px; font-size: 10px; color: #617567; }
+.treasury-bar { position: absolute; top: 90px; left: 24px; display: flex; align-items: center; gap: 24px; padding: 14px 18px; background: #f4f4e9e0; border: 1px solid #fff9; border-radius: 10px; backdrop-filter: blur(12px); }
+.treasury-name { max-width: 100px; font-size: 10px; color: #617567; line-height: 1.4; }
+.treasury-resource > span { display: block; font-size: 10px; color: #617567; margin-bottom: 3px; }
+.treasury-resource b { font-size: 17px; font-weight: 500; white-space: nowrap; }
+.treasury-resource small { font-size: 10px; color: #7c8876; font-weight: 400; margin-left: 4px; }
+.city-panel, .resource-panel { position: absolute; width: 248px; padding: 17px; background: #f6f5e9ed; border: 1px solid #fff9; border-radius: 12px; box-shadow: 0 9px 30px #31503c16; backdrop-filter: blur(12px); }
+.city-panel { right: 24px; top: 213px; }
+.resource-panel { left: 24px; top: 175px; width: 248px; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; }
+.panel-heading button { border: 0; color: #617567; background: transparent; font-size: 21px; padding: 0 2px; line-height: 1; }
+.city-panel h2, .resource-panel h2 { font: 400 20px Georgia, serif; line-height: 1.25; margin: 10px 0 16px; overflow-wrap: anywhere; }
+.city-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; }
+.city-stats span { display: block; font-size: 10px; color: #738478; margin-bottom: 4px; }
+.city-stats b { font-size: 14px; font-weight: 500; }
+.city-income { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 12px 0; margin-top: 12px; border-top: 1px solid #294c3e15; font-size: 11px; color: #617567; }
+.city-actions { display: grid; gap: 7px; }
+.city-actions button, .worker-action, .manage-resources { width: 100%; border: 1px solid #bcc8b8; border-radius: 5px; background: #234c45; color: #f6f3e8; padding: 10px 8px; font-size: 11px; }
+.manage-resources { background: transparent; color: #344f50; margin-top: 10px; }
+.city-hint { margin: 8px 0 0; font-size: 10px; line-height: 1.6; color: #738478; }
+.resource-state { display: inline-block; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; padding: 5px 7px; border-radius: 4px; background: #e3e4d4; color: #7b795b; }
+.resource-state.worked { background: #d6e4cf; color: #41654b; }
+.resource-panel p { font-size: 11px; line-height: 1.6; margin: 10px 0; }
+.resource-yield { color: #344f50; }
+.resource-owner, .resource-restriction { color: #738478; }
+.resource-panel small { display: block; margin-top: 8px; font-size: 10px; line-height: 1.5; color: #738478; }
+.unit-card { left: 24px; bottom: 56px; width: 348px; padding: 14px; gap: 12px; }
+.unit-portrait { height: 78px; min-width: 54px; }
+.unit-info h2 { font-size: 20px; }
+.unit-meta { margin-top: 12px; flex-wrap: wrap; }
+.restart { right: 24px; bottom: 76px; padding: 14px 18px; }
+.restart-expedition { right: 24px; bottom: 52px; }
+.bottom-status { bottom: 75px; max-width: min(340px, calc(100vw - 660px)); }
+.terrain-readout { bottom: 182px; height: auto; min-height: 30px; max-width: calc(100vw - 48px); flex-wrap: wrap; justify-content: center; padding: 8px 12px; white-space: normal; line-height: 1.5; }
+.map-tools, .map-tools.city-open { top: auto; bottom: 207px; right: 24px; gap: 15px; }
+.map-tools .north { display: none; }
+.combat-preview { right: 298px; bottom: 68px; padding: 16px; font-size: 12px; }
+button:disabled { cursor: default; }
+@media (max-height: 820px) {
+  .city-panel { padding: 14px; }
+  .city-panel h2 { margin-bottom: 12px; }
+  .city-stats { gap: 10px; }
+  .city-income { padding: 9px 0; margin-top: 9px; }
+  .city-actions button, .manage-resources { padding: 8px; }
+  .unit-card { bottom: 49px; }
+  .unit-portrait { height: 65px; }
+  .terrain-readout { bottom: 159px; }
+  .map-tools, .map-tools.city-open { bottom: 174px; }
 }
-.city-info button {
-  width: 100%;
-  padding: 9px;
-  border: 1px solid #bcc8b8;
-  border-radius: 5px;
-  background: #234c45;
-  color: #f6f3e8;
-  font: inherit;
-  cursor: pointer;
+@media (max-width: 1100px) {
+  .treasury-bar { gap: 14px; padding: 12px; }
+  .treasury-name { display: none; }
+  .city-panel, .resource-panel, .expedition-card { width: 220px; }
+  .city-panel h2 { font-size: 18px; }
+  .chapter { display: none; }
+  .unit-card { width: 318px; }
+  .combat-preview { right: 265px; }
 }
-.city-info button:disabled {
-  opacity: 0.45;
-  cursor: default;
+@media (max-width: 700px) {
+  .topbar { padding: 0 15px; }
+  .lobby-shell { right: 65px; }
+  .treasury-bar { left: 15px; top: 85px; gap: 12px; }
+  .treasury-resource b { font-size: 14px; }
+  .treasury-resource small { display: block; margin-left: 0; }
+  .expedition-card { top: 159px; right: 15px; width: 188px; }
+  .city-panel { top: 278px; right: 15px; width: 188px; padding: 12px; }
+  .resource-panel { left: 15px; top: 170px; width: 190px; padding: 12px; }
+  .city-panel h2, .resource-panel h2 { font-size: 17px; }
+  .city-stats span { font-size: 9px; }
+  .unit-card { left: 15px; bottom: 73px; width: min(318px, calc(100vw - 30px)); }
+  .restart { right: 15px; bottom: 35px; }
+  .restart-expedition { left: 15px; bottom: 43px; right: auto; }
+  .map-tools, .map-tools.city-open { right: 15px; bottom: 145px; }
+  .terrain-readout { bottom: 184px; }
+  .combat-preview { left: 15px; right: auto; bottom: 189px; }
 }
 
-.map-tools.city-open {
-  right: 330px;
-}
-@media (min-width: 1650px) {
-  .map-tools.city-open {
-    right: 350px;
-  }
-}
-@media (max-width: 1050px) {
-  .map-tools.city-open {
-    right: 250px;
-  }
-}
-@media (max-width: 650px) {
-  .map-tools.city-open {
-    right: 210px;
-  }
-}
-
-.expedition-card { max-height: calc(100vh - 330px); overflow-y: auto; }
-.city-info > button { margin-top: 6px; }
-.worker-list { max-height: 210px; overflow-y: auto; }
-.worker-tile { display: flex; gap: 8px; align-items: center; padding: 7px 4px; border-bottom: 1px solid #bcc8b8; }
-.worker-tile.worked { background: #dce7cf; }
-.worker-tile span { flex: 1; text-transform: capitalize; font-size: 12px; }
-.worker-tile small { display: block; font-size: 10px; margin-top: 3px; }
-.worker-tile button { width: auto; font-size: 11px; padding: 6px; }
+.player-line > div, .unit-info { min-width: 0; }
+.player-line strong, .unit-info h2, .treasury-name, .resource-panel p { overflow-wrap: anywhere; }
+.map-tools.city-open { right: 298px; }
+@media (max-width: 1100px) { .map-tools.city-open { right: 264px; } }
+@media (max-width: 700px) { .map-tools.city-open { right: 218px; } }

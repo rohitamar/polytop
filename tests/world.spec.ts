@@ -114,6 +114,17 @@ test("eight-player 30x30 match broadcasts terrain, captures territory and render
     expect(await snapshot(guest)).toEqual(state);
     expect(await guest.evaluate(() => window.__GAME_DEBUG__!.getTerritory())).toEqual(after);
     for (const bot of bots) { await expect.poll(() => bot.state?.revision).toBe(state.revision); expect(bot.state).toEqual(state); expect(getTerritory(bot.state!)).toEqual(after); }
+    await clickTile(page, target.x, target.y);
+    await page.getByRole("button", { name: "Manage resources", exact: true }).click();
+    const resource = state.tiles.find(tile => tile.resource && after.some(claim => positionKey(claim) === positionKey(tile) && claim.cityId === target.id))!;
+    await clickTile(page, resource.x, resource.y);
+    await page.getByRole("button", { name: "Assign Civilian", exact: true }).click();
+    await settled(page, state.revision + 1);
+    await settled(guest, state.revision + 1);
+    state = await snapshot(page);
+    expect(await snapshot(guest)).toEqual(state);
+    for (const bot of bots) { await expect.poll(() => bot.state?.revision).toBe(state.revision); expect(bot.state).toEqual(state); }
+    for (const client of [page, guest]) expect((await client.evaluate(() => window.__GAME_DEBUG__!.getResourceRenderStats())).developed).toBe(1);
     for (const client of [page, guest]) {
       if (client === guest) {
         await page.screenshot({ path: testInfo.outputPath("eight-player-captured-territory.png") });

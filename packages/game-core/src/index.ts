@@ -1,5 +1,5 @@
-import { generateWorld, type WorldConfig } from "./world";
-export { getMapSize, mapSizes, terrainRules, type WorldConfig } from "./world";
+import { generateWorld, placeResources, resourceRules, type WorldConfig } from "./world";
+export { getMapSize, mapSizes, terrainRules, resourceRules, type WorldConfig } from "./world";
 export type Terrain = "grass" | "forest" | "mountain" | "water";
 export type Position = { x: number; y: number };
 export type Resource = "gold" | "food" | "wood" | "steel";
@@ -21,7 +21,6 @@ export const economy = {
   maxLevel: 3,
   growthCost: 4,
   startingPopulation: 3,
-  workRadius: 2,
   yields: {
     orchard: { resource: "food", amount: 2 },
     wheat: { resource: "food", amount: 3 },
@@ -41,21 +40,30 @@ export function getCityPopulation(state: GameState, city: City) {
   return { total: city.population, military, civilian, available: civilian - city.workedTiles.length, cap: economy.populationCaps[city.townHallLevel - 1] };
 }
 export function getWorkableTiles(state: GameState, cityId: string): Tile[] {
-  return state.tiles.filter(tile => {
-    if (!tile.resource || state.cities.some(city => positionKey(city) === positionKey(tile))) return false;
-    const nearest = state.cities.filter(city => Math.abs(city.x - tile.x) + Math.abs(city.y - tile.y) <= economy.workRadius)
-      .sort((a, b) => (Math.abs(a.x - tile.x) + Math.abs(a.y - tile.y)) - (Math.abs(b.x - tile.x) + Math.abs(b.y - tile.y)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    return nearest[0]?.id === cityId;
-  });
+  const city = state.cities.find(city => city.id === cityId);
+  if (!city?.ownerId) return [];
+  const claims = new Map(getTerritory(state).map(tile => [positionKey(tile), tile.cityId]));
+  const centers = new Set(state.cities.map(positionKey));
+  return state.tiles.filter(tile => tile.resource && !centers.has(positionKey(tile)) && claims.get(positionKey(tile)) === cityId);
+}
+export function getCityProduction(state: GameState, cityId: string): Resources {
+  const city = state.cities.find(city => city.id === cityId);
+  const result = emptyResources();
+  if (!city?.ownerId) return result;
+  result.gold = economy.goldIncome[city.townHallLevel - 1];
+  const worked = new Set(city.workedTiles);
+  for (const tile of getWorkableTiles(state, city.id)) {
+    if (!worked.has(positionKey(tile))) continue;
+    const yieldRule = economy.yields[tile.resource!];
+    result[yieldRule.resource] += yieldRule.amount;
+  }
+  return result;
 }
 export function getProduction(state: GameState, playerId: string): Resources {
-  const result = { ...emptyResources(), gold: getIncome(state, playerId) };
+  const result = emptyResources();
   for (const city of state.cities.filter(city => city.ownerId === playerId)) {
-    for (const tile of getWorkableTiles(state, city.id)) {
-      if (!city.workedTiles.includes(positionKey(tile))) continue;
-      const yieldRule = economy.yields[tile.resource!];
-      result[yieldRule.resource] += yieldRule.amount;
-    }
+    const income = getCityProduction(state, city.id);
+    for (const resource of ["gold", "food", "wood", "steel"] as const) result[resource] += income[resource];
   }
   return result;
 }
@@ -87,24 +95,26 @@ export type GameState = {
 };
 export const territoryRules = { radius: 2 } as const;
 export type TileTerritory = Position & { cityId: string | null; playerId: string | null };
+function claimTile(state: GameState, tile: Position, radius: number): TileTerritory {
+  let closest: City | undefined;
+  let best = radius + 1;
+  for (const city of state.cities) {
+    const distance = Math.abs(city.x - tile.x) + Math.abs(city.y - tile.y);
+    if (distance <= radius && (distance < best || distance === best && city.id < closest!.id)) {
+      closest = city;
+      best = distance;
+    }
+  }
+  return { x: tile.x, y: tile.y, cityId: closest?.id ?? null, playerId: closest?.ownerId ?? null };
+}
 export function getTerritory(state: GameState, radius: number = territoryRules.radius): TileTerritory[] {
   if (!Number.isInteger(radius) || radius < 0) throw new Error("Invalid territory radius");
-  const cities = [...state.cities].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-  return state.tiles.map(tile => {
-    let closest: City | undefined;
-    let best = radius + 1;
-    for (const city of cities) {
-      const distance = Math.abs(city.x - tile.x) + Math.abs(city.y - tile.y);
-      if (distance < best) {
-        closest = city;
-        best = distance;
-      }
-    }
-    return { x: tile.x, y: tile.y, cityId: closest?.id ?? null, playerId: closest?.ownerId ?? null };
-  });
+  return state.tiles.map(tile => claimTile(state, tile, radius));
 }
-export const getTileTerritory = (state: GameState, x: number, y: number) =>
-  getTerritory(state).find(tile => tile.x === x && tile.y === y);
+export const getTileTerritory = (state: GameState, x: number, y: number) => {
+  const tile = getTile(state, x, y);
+  return tile ? claimTile(state, tile, territoryRules.radius) : undefined;
+};
 
 export type GameAction =
   | {
@@ -154,11 +164,9 @@ export function createGame(seed = "fern-104", playerCount = 2, config: WorldConf
       workedTiles: [],
     })),
   ];
-  for (const tile of tiles) {
-    if (cities.some(city => city.x === tile.x && city.y === tile.y)) continue;
-    tile.resource = tile.terrain === "forest" ? "forest" : tile.terrain === "mountain" ? "mine" : tile.terrain === "water" ? "fishery" : (tile.x + tile.y) % 2 === 0 ? "orchard" : "wheat";
-  }
-  return {
+  placeResources(seed, tiles, world.width, world.height);
+  for (const tile of tiles) if (cities.some(city => city.x === tile.x && city.y === tile.y)) delete tile.resource;
+  const state: GameState = {
     seed,
     width: world.width,
     height: world.height,
@@ -193,6 +201,22 @@ export function createGame(seed = "fern-104", playerCount = 2, config: WorldConf
       hasAttacked: false,
     })),
   };
+  const claims = new Map(getTerritory(state).map(tile => [positionKey(tile), tile.cityId]));
+  for (const city of cities) {
+    const nearby = tiles.filter(tile => tile.terrain === "grass" && claims.get(positionKey(tile)) === city.id && !cities.some(center => positionKey(center) === positionKey(tile)));
+    const opportunities = tiles.filter(tile => tile.resource && claims.get(positionKey(tile)) === city.id);
+    const food = opportunities.find(tile => tile.resource === "wheat" || tile.resource === "orchard");
+    if (!food && nearby.length) {
+      nearby[0].resource = "wheat";
+      if (!opportunities.includes(nearby[0])) opportunities.push(nearby[0]);
+    }
+    for (const tile of nearby) {
+      if (opportunities.length >= resourceRules.minimumCityOpportunities) break;
+      if (!tile.resource) { tile.resource = food?.resource ?? "wheat"; opportunities.push(tile); }
+    }
+  }
+  if (config.scenario === "demo") getTile(state, 4, 3)!.resource = "wheat";
+  return state;
 }
 
 export function getReachableTiles(

@@ -11,6 +11,8 @@ import type {
 export interface GameDebug {
   getProfile(): { frames: { cpu: number; interval: number; draws: number; active: number }[]; picks: number[]; builds: number; updates: number; meshes: number; materials: number; loops: number; reactRenders: number };
   resetProfile(): void;
+  getResourceRenderStats(): { builds: number; meshes: number; opportunities: number; developed: number; selectedTile: string | null };
+  getSelectedResource(): string | null;
   getTerritoryRenderStats(): { builds: number; meshes: number; quads: number; selectedCityId: string | null };
   getTerritory(): TileTerritory[];
   getTileTerritory(x: number, y: number): TileTerritory | undefined;

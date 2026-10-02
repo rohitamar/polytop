@@ -42,19 +42,38 @@ Repeat with `node scripts/profile-scene.mjs economy`. It also captures `profile-
 
 ## Scalable worlds and territory
 
-The new deterministic `fern-104` strategic worlds were measured sequentially in one Chromium process with SwiftShader at 1440×1000. Each board receives a five-second warmup, five-second idle and selected-city samples, and 100 real hover moves. `scene-profile-worlds-before.json` records the initial implementation; `scene-profile-worlds.json` records the final water-ripple batching. Run `PLAYWRIGHT_BASE_URL=http://127.0.0.1:5191 node scripts/profile-worlds.mjs` with a web preview running, without concurrent browser tests.
+The new deterministic `fern-104` strategic worlds were measured sequentially in one Chromium process with SwiftShader at 1440Ã—1000. Each board receives a five-second warmup, five-second idle and selected-city samples, and 100 real hover moves. `scene-profile-worlds-before.json` records the initial implementation; `scene-profile-worlds.json` records the final water-ripple batching. Run `PLAYWRIGHT_BASE_URL=http://127.0.0.1:5191 node scripts/profile-worlds.mjs` with a web preview running, without concurrent browser tests.
 
 | Scenario | Draws/frame | CPU render mean (ms) | Frame interval mean / p95 (ms) | Effective FPS |
 | --- | ---: | ---: | ---: | ---: |
-| 20×20, two players, idle | 86 | 2.13 | 36.24 / 37.60 | 27.60 |
-| 20×20, selected city and unit | 113 | 2.32 | 37.94 / 39.40 | 26.36 |
-| 30×30, eight players, idle | 206 | 3.85 | 50.08 / 52.30 | 19.97 |
-| 30×30, selected city and unit | 233 | 3.90 | 51.39 / 53.20 | 19.46 |
+| 20Ã—20, two players, idle | 86 | 2.13 | 36.24 / 37.60 | 27.60 |
+| 20Ã—20, selected city and unit | 113 | 2.32 | 37.94 / 39.40 | 26.36 |
+| 30Ã—30, eight players, idle | 206 | 3.85 | 50.08 / 52.30 | 19.97 |
+| 30Ã—30, selected city and unit | 233 | 3.90 | 51.39 / 53.20 | 19.46 |
 
-The initial 30×30 scene submitted 525 idle draws with 4.91 ms CPU and 52.91 ms frame intervals. Hundreds of transparent water-ripple boxes were the largest avoidable draw-call source. They now merge into one static, non-pickable mesh using their existing material and exact box geometry. This lowers idle draws to 206 (61% reduction) and CPU to 3.85 ms (22% reduction). Alpha ordering draws these disjoint water details before other transparent overlays. Existing terrain instances, frozen matrices, cached shadows, shadow quality, and the single render loop remain intact. Tile lookup and height calculation use a row-major fast path while retaining support for reordered tile arrays.
+The initial 30Ã—30 scene submitted 525 idle draws with 4.91 ms CPU and 52.91 ms frame intervals. Hundreds of transparent water-ripple boxes were the largest avoidable draw-call source. They now merge into one static, non-pickable mesh using their existing material and exact box geometry. This lowers idle draws to 206 (61% reduction) and CPU to 3.85 ms (22% reduction). Alpha ordering draws these disjoint water details before other transparent overlays. Existing terrain instances, frozen matrices, cached shadows, shadow quality, and the single render loop remain intact. Tile lookup and height calculation use a row-major fast path while retaining support for reordered tile arrays.
 
-The larger board remains slower than the new 20×20 board on this software renderer: 900 tiles and eight units require more geometry submission and rasterization. GPU hardware FPS was not measured. The optimized 30×30 board still submits fewer draws than the previous 20×20 economy scene. Initial generation plus scene rebuild measured 32.6 ms for 20×20 and 47.1 ms for 30×30; these are warm browser measurements, not network/load time guarantees.
+The larger board remains slower than the new 20Ã—20 board on this software renderer: 900 tiles and eight units require more geometry submission and rasterization. GPU hardware FPS was not measured. The optimized 30Ã—30 board still submits fewer draws than the previous 20Ã—20 economy scene. Initial generation plus scene rebuild measured 32.6 ms for 20Ã—20 and 47.1 ms for 30Ã—30; these are warm browser measurements, not network/load time guarantees.
 
 Eight-player hover picking averaged 0.79 ms (p95 0.90 ms). Every settled sample had zero world rebuilds, world updates and territory rebuilds, with exactly one render loop. Idle and selected samples had zero React renders; the hover sweep updated the terrain label 60 times without updating the world. Territory uses nine batches for eight owners plus neutral claims, and ten with selected-city tint. Material counts are 41 for two players and 49 for eight; the increase comes from existing unit HP materials/textures and does not scale per tile.
 
-Browser regressions exercise actual pointer moves, city selection on 30×30 and rectangular boards, and capture in an eight-client authoritative match. The eight-client test uses two rendered browser contexts and six real WebSocket participants to check exact terrain/state/territory agreement without competing eight software GPU scenes.
+Browser regressions exercise actual pointer moves, city selection on 30Ã—30 and rectangular boards, and capture in an eight-client authoritative match. The eight-client test uses two rendered browser contexts and six real WebSocket participants to check exact terrain/state/territory agreement without competing eight software GPU scenes.
+
+## Resource opportunities and development
+
+`node scripts/profile-resources.mjs` measures the same seed, viewport and SwiftShader renderer, including real board selection and civilian assignment. `scene-profile-resources.json` contains the final samples. Run it without concurrent browser tests; set `PLAYWRIGHT_BASE_URL` to the development preview.
+
+| Scenario | Draws/frame | CPU render mean (ms) | Frame interval mean / p95 (ms) | Effective FPS |
+| --- | ---: | ---: | ---: | ---: |
+| 20x20, idle | 92 | 2.25 | 37.43 / 39.00 | 26.72 |
+| 20x20, hover | 93 | 2.21 | 39.08 / 41.60 | 25.59 |
+| 20x20, selected | 120 | 2.35 | 38.75 / 40.10 | 25.80 |
+| 20x20, developed | 96 | 2.24 | 37.75 / 38.80 | 26.49 |
+| 30x30, idle | 212 | 3.96 | 52.31 / 54.10 | 19.12 |
+| 30x30, hover | 213 | 3.65 | 54.97 / 57.40 | 18.19 |
+| 30x30, selected | 240 | 4.37 | 54.33 / 56.40 | 18.41 |
+| 30x30, developed | 216 | 4.29 | 53.14 / 54.70 | 18.82 |
+
+The 30x30 board contains 527 opportunities in six merged material batches. Selecting a city adds one marker batch; a worked food tile uses eight resource/selection batches total. Assignment and unassignment retain the shared materials, and all settled samples have zero resource, territory or world rebuilds and one render loop. Hover updates the readout without updating the world. Opportunity geometry adds six idle draws over the preceding territory milestone (206 to 212); idle frame time rises modestly from about 50 ms to about 53 ms on this software renderer. The existing shadow cache, terrain instances, frozen transforms and merged water ripples remain intact. Resource decorations are non-pickable.
+
+These remain software GPU measurements, with roughly 19 FPS on the largest board; hardware GPU performance has not been measured. Development increases geometry on action acceptance rather than per frame. The renderer test exercises all five developed types, ensures shared non-pickable meshes and verifies unchanged-state caching. Browser tests verify assignment/removal and exact state equality between independent clients, plus development after capture in an eight-client match. Desktop panels fit without nested scrolling or covering the unit card/End Turn at 1280x720, 1366x768, 1440x900 and 1920x1080.

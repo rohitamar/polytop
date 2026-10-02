@@ -1,4 +1,4 @@
-import { getTerritory, applyAction, getReachableTiles, getWorkableTiles, getAttackTargets, type GameState } from "@reach/game-core";
+import { economy, getCityPopulation, getProduction, getTerritory, applyAction, getReachableTiles, getWorkableTiles, getAttackTargets, type GameState } from "@reach/game-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
@@ -105,6 +105,25 @@ describe("lobby WebSocket server", () => {
     const next = await act(first.clients, first.state, { type: "END_TURN" });
     expect(getTerritory(next)).toEqual(getTerritory(first.state));
     expect((await act(second.clients, second.state, { type: "END_TURN" })).revision).toBe(1);
+  });
+
+  it("synchronizes resource placement, development, unassignment and production for eight clients", async () => {
+    await server.close();
+    server = createLobbyServer({ seed: "fern-104" });
+    port = await server.listen(0);
+    let { clients, state } = await match(8);
+    const placement = structuredClone(state.tiles);
+    const tile = getWorkableTiles(state, "city-1")[0];
+    const yieldRule = economy.yields[tile.resource!];
+    state = await act(clients, state, { type: "ASSIGN_WORKER", cityId: "city-1", tile: { x: tile.x, y: tile.y } });
+    expect(getCityPopulation(state, state.cities[0]).available).toBe(1);
+    expect(getProduction(state, state.players[0].id)[yieldRule.resource]).toBe(yieldRule.amount);
+    for (let i = 0; i < 8; i++) state = await act(clients, state, { type: "END_TURN" });
+    expect(state.players[0].resources[yieldRule.resource]).toBe(yieldRule.amount);
+    state = await act(clients, state, { type: "UNASSIGN_WORKER", cityId: "city-1", tile: { x: tile.x, y: tile.y } });
+    expect(getCityPopulation(state, state.cities[0]).available).toBe(2);
+    expect(getProduction(state, state.players[0].id)[yieldRule.resource]).toBe(0);
+    expect(state.tiles).toEqual(placement);
   });
 
   it("requires a host and two players to start", async () => {

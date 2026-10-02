@@ -43,7 +43,13 @@ test("independent browsers play one authoritative match including economy and co
     expect(territory.filter(tile => tile.cityId === "neutral-1")).toEqual(neutralTerritory.map(tile => ({ ...tile, playerId: ownerId })));
     const cityPosition = await page.evaluate(() => window.__GAME_DEBUG__!.getTileScreenPosition(4, 5));
     await page.mouse.click(cityPosition.x, cityPosition.y);
-    const assign = page.getByRole("button", { name: /^Assign worker/ }).first();
+    const work = await page.evaluate(() => {
+      const debug = window.__GAME_DEBUG__!;
+      return debug.getState().tiles.find(tile => tile.resource && debug.getTileTerritory(tile.x, tile.y)?.cityId === "city-1")!;
+    });
+    const resource = await page.evaluate(tile => window.__GAME_DEBUG__!.getTileScreenPosition(tile.x, tile.y), work);
+    await page.mouse.click(resource.x, resource.y);
+    const assign = page.getByRole("button", { name: "Assign Civilian", exact: true });
     await expect(assign).toBeEnabled();
     await assign.click();
     for (const client of [page, guest]) await settled(client, 2);
