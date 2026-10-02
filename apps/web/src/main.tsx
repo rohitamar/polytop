@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   applyAction,
+  getAttackTargets,
+  previewCombat,
   createGame,
   getReachableTiles,
   getTile,
@@ -10,6 +12,7 @@ import {
   type Tile,
 } from "@reach/game-core";
 import { createWorld, type World } from "./world";
+import { playerStyle } from "./player-style";
 import "./debug";
 import "./style.css";
 
@@ -45,10 +48,12 @@ function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const world = useRef<World | null>(null);
   const stateRef = useRef(createGame());
-  const selection = useRef(false);
+  const selection = useRef<string | null>(null);
   const busy = useRef(false);
   const [state, setState] = useState<GameState>(stateRef.current);
-  const [selected, setSelected] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
+  const targetRef = useRef<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [hovered, setHovered] = useState<Tile | null>(null);
   const [notice, setNotice] = useState(
@@ -56,10 +61,49 @@ function App() {
   );
   const [failed, setFailed] = useState(false);
   const [help, setHelp] = useState(false);
-  const unit = state.units[0];
+  const [blockedOwner, setBlockedOwner] = useState<string | null>(null);
+  const activePlayerIndex = state.players.findIndex(
+    (player) => player.id === state.activePlayerId,
+  );
+  const activePlayer = state.players[activePlayerIndex];
+  const activeUnits = state.units.filter(
+    (unit) => unit.ownerId === state.activePlayerId,
+  );
+  const unit =
+    state.units.find((unit) => unit.id === selected) ?? activeUnits[0];
+  const owner = state.players.find((player) => player.id === unit?.ownerId);
+  const availableMovement = activeUnits.reduce(
+    (total, unit) => total + unit.movement,
+    0,
+  );
+  const maximumMovement = activeUnits.reduce(
+    (total, unit) => total + unit.maxMovement,
+    0,
+  );
 
-  const select = (value: boolean) => {
+  const combat =
+    selected &&
+    target &&
+    !moving &&
+    getAttackTargets(state, selected).some((unit) => unit.id === target)
+      ? previewCombat(state, selected, target)
+      : null;
+  const clearTarget = () => {
+    targetRef.current = null;
+    setTarget(null);
+  };
+  const select = (value: string | null) => {
+    if (
+      value &&
+      !stateRef.current.units.some(
+        (unit) =>
+          unit.id === value && unit.ownerId === stateRef.current.activePlayerId,
+      )
+    )
+      return;
+    clearTarget();
     selection.current = value;
+    setBlockedOwner(null);
     setSelected(value);
     world.current?.update(stateRef.current, value);
   };
@@ -67,9 +111,58 @@ function App() {
     if (busy.current) return;
     stateRef.current = createGame(seed);
     setState(stateRef.current);
-    select(false);
+    select(null);
     world.current?.rebuild(stateRef.current);
+    world.current?.update(stateRef.current, null);
     setNotice("A fresh beginning. Select your warrior to explore.");
+  };
+  const endTurn = () => {
+    if (busy.current) return;
+    const next = applyAction(stateRef.current, {
+      type: "END_TURN",
+      playerId: stateRef.current.activePlayerId,
+    });
+    stateRef.current = next;
+    setState(next);
+    select(null);
+    const player = next.players.find(
+      (player) => player.id === next.activePlayerId,
+    )!;
+    setNotice(`${player.name}'s turn. Select your warrior to move.`);
+  };
+
+  const attack = async () => {
+    if (busy.current || !selection.current || !targetRef.current) return;
+    const current = stateRef.current;
+    const result = previewCombat(current, selection.current, targetRef.current);
+    const next = applyAction(current, {
+      type: "ATTACK_UNIT",
+      playerId: current.activePlayerId,
+      unitId: result.attackerId,
+      targetId: result.defenderId,
+    });
+    busy.current = true;
+    setMoving(true);
+    clearTarget();
+    stateRef.current = next;
+    setState(next);
+    world.current!.update(next, null);
+    setNotice("Blades meet…");
+    await world.current!.combat(current, next, result);
+    if (!world.current) return;
+    busy.current = false;
+    setMoving(false);
+    select(
+      next.units.some((unit) => unit.id === result.attackerId)
+        ? result.attackerId
+        : null,
+    );
+    const survivingOwners = new Set(next.units.map((unit) => unit.ownerId));
+    setNotice(
+      survivingOwners.size === 1
+        ? `${next.players.find((player) => survivingOwners.has(player.id))!.name} holds the island. Restart for another duel.`
+        : "Attack complete. This warrior is done for the turn.",
+    );
   };
 
   useEffect(() => {
@@ -77,17 +170,43 @@ function App() {
     const click = async (position: Position) => {
       if (busy.current) return;
       const current = stateRef.current;
-      const warrior = current.units[0];
-      if (warrior.x === position.x && warrior.y === position.y) {
-        select(true);
+      const clickedUnit = current.units.find(
+        (unit) => unit.x === position.x && unit.y === position.y,
+      );
+      if (clickedUnit) {
+        if (clickedUnit.ownerId !== current.activePlayerId) {
+          if (
+            selection.current &&
+            getAttackTargets(current, selection.current).some(
+              (unit) => unit.id === clickedUnit.id,
+            )
+          ) {
+            targetRef.current = clickedUnit.id;
+            setTarget(clickedUnit.id);
+            setNotice("Review the combat preview, then confirm Attack.");
+            return;
+          }
+          select(null);
+          const owner = current.players.find(
+            (player) => player.id === clickedUnit.ownerId,
+          )!;
+          setBlockedOwner(owner.name);
+          setNotice(`${owner.name}'s warrior is waiting for its owner's turn.`);
+          return;
+        }
+        select(clickedUnit.id);
         setNotice(
-          warrior.movement
+          clickedUnit.movement
             ? "Choose a highlighted tile to move."
-            : "Movement spent. Restart the expedition to explore again.",
+            : "Movement spent. End your turn to continue.",
         );
         return;
       }
-      if (!selection.current) return;
+      clearTarget();
+      const warrior = current.units.find(
+        (unit) => unit.id === selection.current,
+      );
+      if (!warrior) return;
       const destination = getReachableTiles(current, warrior.id).find(
         (tile) => tile.x === position.x && tile.y === position.y,
       );
@@ -105,44 +224,62 @@ function App() {
       setMoving(true);
       stateRef.current = next;
       setState(next);
-      world.current!.update(next, false);
+      world.current!.update(next, null);
       setNotice("On the move…");
-      await world.current!.move(destination.path);
+      await world.current!.move(warrior.id, destination.path);
       if (!alive) return;
       busy.current = false;
       setMoving(false);
-      world.current!.update(next, true);
+      world.current!.update(next, warrior.id);
       setNotice(
-        next.units[0].movement
+        next.units.find((unit) => unit.id === warrior.id)!.movement
           ? "New ground, new possibilities. One step remains."
-          : "A little farther into the unknown. Movement complete.",
+          : "Movement spent. End your turn to continue.",
       );
     };
     try {
       const instance = createWorld(canvas.current!, click, setHovered);
       world.current = instance;
       instance.rebuild(stateRef.current);
-      instance.update(stateRef.current, false);
+      instance.update(stateRef.current, null);
       if (import.meta.env.DEV) {
+        const debugUnit = (unitId?: string) => {
+          const current = stateRef.current;
+          const unit = unitId
+            ? current.units.find((unit) => unit.id === unitId)
+            : (current.units.find((unit) => unit.id === selection.current) ??
+              current.units.find(
+                (unit) => unit.ownerId === current.activePlayerId,
+              ));
+          if (!unit) throw new Error("Unknown unit");
+          return unit;
+        };
         window.__GAME_DEBUG__ = {
           getState: () => structuredClone(stateRef.current),
           getUnits: () => structuredClone(stateRef.current.units),
+          getActivePlayer: () =>
+            structuredClone(
+              stateRef.current.players.find(
+                (player) => player.id === stateRef.current.activePlayerId,
+              )!,
+            ),
+          getTurnNumber: () => stateRef.current.turnNumber,
           getTile: (x, y) => structuredClone(getTile(stateRef.current, x, y)),
           setSeed: (seed) => {
             if (busy.current) throw new Error("Wait for movement to finish");
             reset(seed);
           },
-          getReachableTiles: () =>
+          getReachableTiles: (unitId) =>
             structuredClone(
-              getReachableTiles(stateRef.current, stateRef.current.units[0].id),
+              getReachableTiles(stateRef.current, debugUnit(unitId).id),
             ),
-          getSelectedUnitId: () =>
-            selection.current ? stateRef.current.units[0].id : null,
+          getSelectedUnitId: () => selection.current,
           getTileScreenPosition: (x, y) => instance.project({ x, y }),
-          getUnitScreenPosition: () =>
-            instance.project(stateRef.current.units[0], 0.5),
+          getUnitScreenPosition: (unitId) =>
+            instance.project(debugUnit(unitId), 0.5),
           isAnimating: instance.isAnimating,
-          getVisualPosition: instance.getVisualPosition,
+          getVisualPosition: (unitId) =>
+            instance.getVisualPosition(debugUnit(unitId).id),
           getMarkerCount: instance.getMarkerCount,
           getHoveredTile: instance.getHoveredTile,
         };
@@ -152,7 +289,7 @@ function App() {
       setFailed(true);
     }
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy.current) select(false);
+      if (event.key === "Escape" && !busy.current) select(null);
     };
     window.addEventListener("keydown", keydown);
     return () => {
@@ -160,6 +297,7 @@ function App() {
       window.removeEventListener("keydown", keydown);
       if (import.meta.env.DEV) delete window.__GAME_DEBUG__;
       world.current?.dispose();
+      world.current = null;
     };
   }, []);
 
@@ -181,7 +319,7 @@ function App() {
         </a>
         <div className="chapter">
           <span className="live-dot" /> LOCAL EXPEDITION{" "}
-          <span className="divider" /> CHAPTER 01
+          <span className="divider" /> TURN {state.turnNumber}
         </div>
         <button
           className="icon-button"
@@ -200,38 +338,54 @@ function App() {
         </h1>
         <p>
           An untouched island.
-          <br />A warrior. A world of possibility.
+          <br />
+          Two companies. A world of possibility.
         </p>
         <div className="map-label">
-          <span /> THE FERN ISLES <small>10 × 10</small>
+          <span /> THE FERN ISLES{" "}
+          <small>
+            {state.width} × {state.height}
+          </small>
         </div>
       </section>
       <aside className="expedition-card">
         <div className="eyebrow">
-          <Icon name="flag" /> YOUR EXPEDITION <span>01</span>
+          <Icon name="flag" /> CURRENT TURN{" "}
+          <span data-testid="turn-number">{state.turnNumber}</span>
         </div>
         <div className="player-line">
-          <span className="player-avatar">S</span>
+          <span
+            className="player-avatar"
+            style={{ background: playerStyle(activePlayerIndex).accent }}
+          >
+            {activePlayer.name[0]}
+          </span>
           <div>
-            <strong>The Sunward Company</strong>
-            <small>You · Local prototype</small>
+            <strong data-testid="active-player">
+              The {activePlayer.name} Company
+            </strong>
+            <small>Player {activePlayerIndex + 1} · Local pass-and-play</small>
           </div>
           <span className="player-dot" />
         </div>
         <div className="card-rule" />
         <div className="stat-row">
           <span>Warriors</span>
-          <b>01</b>
+          <b>{activeUnits.length}</b>
         </div>
         <div className="stat-row">
           <span>Movement available</span>
           <b>
-            {unit.movement}
-            <i> / 2</i>
+            {availableMovement}
+            <i> / {maximumMovement}</i>
           </b>
         </div>
         <div className="movement-track">
-          <span style={{ width: `${unit.movement * 50}%` }} />
+          <span
+            style={{
+              width: `${maximumMovement ? (availableMovement / maximumMovement) * 100 : 0}%`,
+            }}
+          />
         </div>
       </aside>
       <div className="map-tools">
@@ -269,66 +423,131 @@ function App() {
           </>
         )}
       </div>
-      <section className={`unit-card ${selected ? "selected" : ""}`}>
-        <div className="unit-portrait">
-          <span className="portrait-crest">✦</span>
-          <Icon name="flag" />
-          <span className="portrait-level">I</span>
-        </div>
-        <div className="unit-info">
-          <div className="eyebrow">
-            {selected ? "WARRIOR SELECTED" : "READY TO EXPLORE"}
+      {unit && owner && (
+        <section className={`unit-card ${selected ? "selected" : ""}`}>
+          <div
+            className="unit-portrait"
+            style={{
+              background: playerStyle(
+                state.players.findIndex((player) => player.id === unit.ownerId),
+              ).accent,
+            }}
+          >
+            <span className="portrait-crest">✦</span>
+            <Icon name="flag" />
+            <span className="portrait-level">I</span>
           </div>
-          <h2>Sunward warrior</h2>
+          <div className="unit-info">
+            <div className="eyebrow">
+              {selected
+                ? `OWNER · ${owner.name.toUpperCase()}`
+                : "READY TO EXPLORE"}
+            </div>
+            <h2>{owner.name} warrior</h2>
+            <p>
+              {blockedOwner
+                ? `${blockedOwner}'s warrior cannot act this turn.`
+                : moving
+                  ? "Crossing new ground…"
+                  : selected
+                    ? unit.hasAttacked
+                      ? "Action spent. End your turn."
+                      : unit.movement
+                        ? "Choose a golden tile to move."
+                        : getAttackTargets(state, unit.id).length
+                          ? "Movement spent. Click a red target to attack."
+                          : "Movement spent. End your turn."
+                    : "Click your warrior on the island."}
+            </p>
+            <div className="unit-meta">
+              <span className="health-line" />{" "}
+              <span>
+                {unit.hp} / {unit.maxHp} HP
+              </span>
+              <span className="meta-divider" />
+              <span className="movement-pips">
+                {Array.from({ length: unit.maxMovement }, (_, i) => (
+                  <i key={i} className={unit.movement > i ? "filled" : ""} />
+                ))}
+              </span>
+              <span>
+                {unit.movement} / {unit.maxMovement} movement
+              </span>
+            </div>
+          </div>
+          <button
+            className="select-button"
+            disabled={moving}
+            onClick={() => {
+              if (busy.current) return;
+              select(unit.id);
+              setNotice(
+                unit.movement
+                  ? "Choose a highlighted tile to move."
+                  : "Movement spent. End your turn to continue.",
+              );
+            }}
+            aria-label="Select warrior"
+          >
+            <Icon name="arrow" />
+          </button>
+        </section>
+      )}
+      {combat && unit && (
+        <section className="combat-preview" aria-label="Combat preview">
+          <div className="eyebrow">MELEE · COMBAT PREVIEW</div>
           <p>
-            {moving
-              ? "Crossing new ground…"
-              : selected
-                ? unit.movement
-                  ? "Choose a golden tile to move."
-                  : "Expedition movement complete."
-                : "Click your warrior on the island."}
+            You: {unit.hp} → {combat.attackerHp}
           </p>
-          <div className="unit-meta">
-            <span className="health-line" /> <span>10 / 10</span>
-            <span className="meta-divider" />
-            <span className="movement-pips">
-              {[0, 1].map((i) => (
-                <i key={i} className={unit.movement > i ? "filled" : ""} />
-              ))}
-            </span>
-            <span>{unit.movement} movement</span>
-          </div>
-        </div>
-        <button
-          className="select-button"
-          disabled={moving}
-          onClick={() => {
-            select(true);
-            setNotice(
-              unit.movement
-                ? "Choose a highlighted tile to move."
-                : "Movement spent. Restart to explore again.",
-            );
-          }}
-          aria-label="Select warrior"
-        >
-          <Icon name="arrow" />
-        </button>
-      </section>
+          <p>
+            Enemy: {state.units.find((unit) => unit.id === target)!.hp} →{" "}
+            {combat.defenderHp}
+          </p>
+          <small>
+            {combat.damage} damage · {combat.retaliation} retaliation
+          </small>
+          <button onClick={attack} disabled={moving}>
+            Attack
+          </button>
+          <button onClick={clearTarget} disabled={moving}>
+            Cancel
+          </button>
+        </section>
+      )}
+      {!unit && (
+        <section className="combat-preview">
+          <p>No warriors remain for {activePlayer.name}.</p>
+          <p>Restart for another duel.</p>
+        </section>
+      )}
       <div className="bottom-status" role="status">
         <span />
         {notice}
       </div>
-      <button className="restart" onClick={() => reset()} disabled={moving}>
-        <Icon name="reset" />
+      <button
+        className="restart"
+        onClick={endTurn}
+        disabled={moving || failed}
+        aria-label="End Turn"
+      >
+        <Icon name="arrow" />
         <span>
-          Restart expedition<small>SAME ISLAND · FRESH FOOTSTEPS</small>
+          End Turn
+          <small>
+            {activePlayer.name.toUpperCase()} · TURN {state.turnNumber}
+          </small>
         </span>
+      </button>
+      <button
+        className="restart-expedition"
+        onClick={() => reset()}
+        disabled={moving}
+      >
+        Restart expedition
       </button>
       <footer>
         <span>
-          EARLY EXPLORATION <b>v0.1</b>
+          EARLY EXPLORATION <b>v0.2</b>
         </span>
         <span>
           CLICK TO SELECT <i>·</i> RIGHT-DRAG TO ORBIT <i>·</i> SCROLL TO ZOOM
@@ -341,8 +560,15 @@ function App() {
         <div className="help-panel">
           <h2>A small beginning</h2>
           <p>
-            Select the warrior and click a golden tile. Your warrior has two
-            movement points for this expedition.
+            Select the active company's warrior and click a golden tile. Each
+            warrior has two movement points per turn. End Turn passes control to
+            the other company; your movement resets when your next turn begins.
+          </p>
+          <p>
+            Click an adjacent enemy on a red tile to preview combat, then
+            confirm Attack. Moving first is allowed; attacking ends that
+            warrior's actions. Injured warriors deal less damage. Surviving
+            defenders retaliate.
           </p>
           <ul>
             <li>Grass costs 1 point.</li>

@@ -14,17 +14,23 @@ import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder"
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
+import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import "@babylonjs/core/Culling/ray";
 import {
   getReachableTiles,
+  getAttackTargets,
+  type CombatPreview,
   positionKey,
   type GameState,
   type Position,
   type Tile,
+  type Unit,
 } from "@reach/game-core";
+import { playerStyle } from "./player-style";
 
 export type World = ReturnType<typeof createWorld>;
 
@@ -62,18 +68,23 @@ export function createWorld(
     buttons: number[];
   };
   pointerInput.buttons = [2];
-  let zoom = 8.1;
+  let defaultZoom = 8.1;
+  let zoom = defaultZoom;
   const resize = () => {
     engine.resize();
     const ratio = canvas.clientWidth / canvas.clientHeight;
-    camera.orthoTop = zoom;
-    camera.orthoBottom = -zoom;
-    camera.orthoLeft = -zoom * ratio;
-    camera.orthoRight = zoom * ratio;
+    const span = zoom * Math.max(1, 1.25 / ratio);
+    camera.orthoTop = span;
+    camera.orthoBottom = -span;
+    camera.orthoLeft = -span * ratio;
+    camera.orthoRight = span * ratio;
   };
   const wheel = (event: WheelEvent) => {
     event.preventDefault();
-    zoom = Math.max(5.8, Math.min(11, zoom + event.deltaY * 0.006));
+    zoom = Math.max(
+      5.8,
+      Math.min(defaultZoom * 1.4, zoom + event.deltaY * 0.012),
+    );
     resize();
   };
   const contextMenu = (event: Event) => event.preventDefault();
@@ -112,13 +123,20 @@ export function createWorld(
   const rock = material("slate", "#89968e");
   const snow = material("chalk", "#e5e9d5");
   const gold = material("brass", "#d9ab58");
-  const cloak = material("saffron", "#e78848");
+  const accents = [0, 1].map((index) =>
+    material(`player-${index}`, playerStyle(index).accent),
+  );
+  const ringMaterials = [0, 1].map((index) =>
+    material(`ring-${index}`, playerStyle(index).ring),
+  );
   const armor = material("ivory", "#ece5c9");
   const dark = material("ink", "#344f50");
   const face = material("skin", "#dca778");
   const foam = material("ripples", "#a7dbd7", 0.6);
   const moveMaterial = material("reachable", "#f5e5a6", 0.46);
   moveMaterial.emissiveColor = Color3.FromHexString("#645a24");
+  const attackMaterial = material("attack target", "#d96956", 0.8);
+  attackMaterial.emissiveColor = Color3.FromHexString("#7a3025");
   const hoverMaterial = material("hover", "#ffffff", 0.23);
   hoverMaterial.emissiveColor = Color3.FromHexString("#698b7b");
   const selectionMaterial = material("selection", "#ffe29b");
@@ -127,14 +145,18 @@ export function createWorld(
   let decorations: Mesh[] = [];
   let markers: Mesh[] = [];
   let currentState: GameState;
-  let selected = false;
+  let selected: string | null = null;
+  const warriors = new Map<string, TransformNode>();
+  const healthLabels = new Map<string, DynamicTexture>();
+  let combatAnimating = false;
+  const ownerRings = new Map<string, Mesh>();
   const tileHeight = (tile?: Tile) =>
     tile?.terrain === "water" ? -0.12 : 0.13;
   const tilePoint = (p: Position) =>
     new Vector3(
-      p.x - 4.5,
+      p.x - (currentState.width - 1) / 2,
       tileHeight(currentState?.tiles.find((t) => t.x === p.x && t.y === p.y)),
-      p.y - 4.5,
+      p.y - (currentState.height - 1) / 2,
     );
   const solid = (
     mesh: Mesh,
@@ -172,9 +194,9 @@ export function createWorld(
     mesh.convertToFlatShadedMesh();
     return solid(mesh, mat, parent);
   };
-  const base = box("floating island", 10.15, 0.62, 10.15, earth);
+  const base = box("floating island", 1, 0.62, 1, earth);
   base.position.y = -0.45;
-  const bottom = box("island foundation", 9.8, 0.22, 9.8, dark);
+  const bottom = box("island foundation", 1, 0.22, 1, dark);
   bottom.position.y = -0.84;
   const floor = solid(
     CreateGround("background", { width: 200, height: 200 }, scene),
@@ -184,42 +206,79 @@ export function createWorld(
   );
   floor.position.y = -1.15;
   floor.receiveShadows = true;
-  const warrior = new TransformNode("warrior", scene);
-  for (const x of [-0.12, 0.12]) {
-    const boot = box("boot", 0.16, 0.17, 0.23, dark, warrior);
-    boot.position.set(x, 0.12, -0.02);
-  }
-  const body = cone("tunic", 0.43, 0.43, armor, warrior, 0.33);
-  body.position.y = 0.4;
-  const cape = box("cape", 0.39, 0.47, 0.1, cloak, warrior);
-  cape.position.set(0, 0.42, 0.17);
-  cape.rotation.x = -0.2;
-  const head = solid(
-    CreateSphere("head", { diameter: 0.3, segments: 4 }, scene),
-    face,
-    warrior,
-  );
-  head.position.y = 0.78;
-  const helmet = cone("helmet", 0.23, 0.39, armor, warrior, 0.22);
-  helmet.position.y = 0.9;
-  const plume = box("plume", 0.08, 0.24, 0.22, cloak, warrior);
-  plume.position.y = 1.09;
-  const visor = box("visor", 0.24, 0.055, 0.07, dark, warrior);
-  visor.position.set(0, 0.8, -0.145);
-  const shield = cone("shield", 0.1, 0.43, gold, warrior, 0.43);
-  shield.rotation.x = Math.PI / 2;
-  shield.position.set(-0.29, 0.44, -0.11);
-  const emblem = box("shield emblem", 0.05, 0.22, 0.12, armor, warrior);
-  emblem.position.set(-0.29, 0.44, -0.15);
-  const blade = box("blade", 0.075, 0.53, 0.065, snow, warrior);
-  blade.position.set(0.3, 0.58, -0.05);
-  blade.rotation.z = -0.15;
-  const guard = box("guard", 0.23, 0.065, 0.08, gold, warrior);
-  guard.position.set(0.26, 0.34, -0.05);
-  for (const mesh of warrior.getChildMeshes()) {
-    mesh.isPickable = true;
-    mesh.metadata = { unit: true };
-  }
+  const createWarrior = (unit: Unit, playerIndex: number) => {
+    const warrior = new TransformNode(unit.id, scene);
+    const cloak = accents[playerIndex % accents.length];
+    for (const x of [-0.12, 0.12]) {
+      const boot = box("boot", 0.16, 0.17, 0.23, dark, warrior);
+      boot.position.set(x, 0.12, -0.02);
+    }
+    const body = cone("tunic", 0.43, 0.43, armor, warrior, 0.33);
+    body.position.y = 0.4;
+    const cape = box("cape", 0.39, 0.47, 0.1, cloak, warrior);
+    cape.position.set(0, 0.42, 0.17);
+    cape.rotation.x = -0.2;
+    const head = solid(
+      CreateSphere("head", { diameter: 0.3, segments: 4 }, scene),
+      face,
+      warrior,
+    );
+    head.position.y = 0.78;
+    const helmet = cone("helmet", 0.23, 0.39, armor, warrior, 0.22);
+    helmet.position.y = 0.9;
+    const plume = box("plume", 0.08, 0.24, 0.22, cloak, warrior);
+    plume.position.y = 1.09;
+    const visor = box("visor", 0.24, 0.055, 0.07, dark, warrior);
+    visor.position.set(0, 0.8, -0.145);
+    const shield = cone("shield", 0.1, 0.43, gold, warrior, 0.43);
+    shield.rotation.x = Math.PI / 2;
+    shield.position.set(-0.29, 0.44, -0.11);
+    const emblem = box("shield emblem", 0.05, 0.22, 0.12, armor, warrior);
+    emblem.position.set(-0.29, 0.44, -0.15);
+    const blade = box("blade", 0.075, 0.53, 0.065, snow, warrior);
+    blade.position.set(0.3, 0.58, -0.05);
+    blade.rotation.z = -0.15;
+    const guard = box("guard", 0.23, 0.065, 0.08, gold, warrior);
+    guard.position.set(0.26, 0.34, -0.05);
+    for (const mesh of warrior.getChildMeshes()) {
+      mesh.isPickable = true;
+      mesh.metadata = { unitId: unit.id };
+    }
+    const ring = solid(
+      CreateTorus(
+        `owner-${unit.id}`,
+        { diameter: 0.66, thickness: 0.035, tessellation: 32 },
+        scene,
+      ),
+      ringMaterials[playerIndex % ringMaterials.length],
+      warrior,
+      false,
+    );
+    ring.position.y = 0.024;
+    ownerRings.set(unit.id, ring);
+    const labelTexture = new DynamicTexture(
+      `hp-${unit.id}`,
+      { width: 256, height: 96 },
+      scene,
+      false,
+    );
+    labelTexture.hasAlpha = true;
+    const labelMaterial = material(`hp-material-${unit.id}`, "#ffffff");
+    labelMaterial.diffuseTexture = labelTexture;
+    labelMaterial.emissiveColor = Color3.White();
+    labelMaterial.disableLighting = true;
+    const label = solid(
+      CreatePlane(`health-${unit.id}`, { width: 0.9, height: 0.34 }, scene),
+      labelMaterial,
+      warrior,
+      false,
+    );
+    label.position.y = 1.45;
+    label.billboardMode = Mesh.BILLBOARDMODE_ALL;
+    healthLabels.set(unit.id, labelTexture);
+    warriors.set(unit.id, warrior);
+    warrior.position.copyFrom(tilePoint(unit));
+  };
   const halo = solid(
     CreateTorus(
       "selected unit",
@@ -232,8 +291,12 @@ export function createWorld(
   );
   const hover = box("hover", 0.95, 0.014, 0.95, hoverMaterial);
   hover.setEnabled(false);
-  let animation: { path: Vector3[]; started: number; done: () => void } | null =
-    null;
+  let animation: {
+    unitId: string;
+    path: Vector3[];
+    started: number;
+    done: () => void;
+  } | null = null;
   let hoveredKey = "";
   scene.onPointerObservable.add((info) => {
     if (
@@ -243,10 +306,12 @@ export function createWorld(
       return;
     const pick = scene.pick(scene.pointerX, scene.pointerY);
     const metadata = pick?.pickedMesh?.metadata;
-    const tile = metadata?.unit
+    const pickedUnit = currentState?.units.find(
+      (unit) => unit.id === metadata?.unitId,
+    );
+    const tile = pickedUnit
       ? currentState?.tiles.find(
-          (t) =>
-            t.x === currentState.units[0].x && t.y === currentState.units[0].y,
+          (t) => t.x === pickedUnit.x && t.y === pickedUnit.y,
         )
       : (metadata?.tile as Tile | undefined);
     if (info.type === PointerEventTypes.POINTERMOVE) {
@@ -258,13 +323,29 @@ export function createWorld(
       hover.setEnabled(!!tile);
       if (tile)
         hover.position.copyFrom(tilePoint(tile).add(new Vector3(0, 0.027, 0)));
-      canvas.style.cursor = tile ? "pointer" : "grab";
+      canvas.style.cursor =
+        pickedUnit &&
+        pickedUnit.ownerId !== currentState.activePlayerId &&
+        (!selected ||
+          !getAttackTargets(currentState, selected).some(
+            (unit) => unit.id === pickedUnit.id,
+          ))
+          ? "not-allowed"
+          : tile
+            ? "pointer"
+            : "grab";
     } else if (tile && (info.event as PointerEvent).button === 0) onClick(tile);
   });
   const rebuild = (state: GameState) => {
     for (const mesh of decorations) mesh.dispose();
     decorations = [];
     currentState = state;
+    base.scaling.set(state.width + 0.15, 1, state.height + 0.15);
+    bottom.scaling.set(state.width - 0.2, 1, state.height - 0.2);
+    defaultZoom = Math.max(state.width, state.height) * 0.81;
+    zoom = defaultZoom;
+    camera.radius = Math.max(state.width, state.height) * 2.2;
+    resize();
     for (const tile of state.tiles) {
       const before = new Set(scene.meshes);
       const point = tilePoint(tile);
@@ -328,15 +409,64 @@ export function createWorld(
         ...(scene.meshes.filter((mesh) => !before.has(mesh)) as Mesh[]),
       );
     }
-    warrior.position.copyFrom(tilePoint(state.units[0]));
+    for (const warrior of warriors.values()) warrior.dispose();
+    warriors.clear();
+    ownerRings.clear();
+    for (const texture of healthLabels.values()) texture.dispose();
+    healthLabels.clear();
+    for (const unit of state.units)
+      createWarrior(
+        unit,
+        state.players.findIndex((player) => player.id === unit.ownerId),
+      );
+    hover.setEnabled(false);
+    hoveredKey = "";
   };
-  const update = (state: GameState, isSelected: boolean) => {
+  const update = (state: GameState, selectedUnitId: string | null) => {
     currentState = state;
-    selected = isSelected;
+    selected = selectedUnitId;
+    for (const unit of state.units) {
+      const texture = healthLabels.get(unit.id);
+      if (texture) {
+        const context = texture.getContext();
+        context.clearRect(0, 0, 256, 96);
+        texture.drawText(
+          `${unit.hp}/${unit.maxHp}`,
+          null,
+          68,
+          "bold 60px sans-serif",
+          "#ffffff",
+          "#344f50",
+          true,
+        );
+      }
+      const ring = ownerRings.get(unit.id);
+      if (ring)
+        ring.visibility = unit.ownerId === state.activePlayerId ? 1 : 0.35;
+    }
     markers.forEach((mesh) => mesh.dispose());
     markers = [];
     if (selected) {
-      for (const tile of getReachableTiles(state, state.units[0].id)) {
+      for (const target of getAttackTargets(state, selected)) {
+        const marker = box("legal attack", 0.91, 0.024, 0.91, attackMaterial);
+        marker.position.copyFrom(
+          tilePoint(target).add(new Vector3(0, 0.02, 0)),
+        );
+        markers.push(marker);
+        const ring = solid(
+          CreateTorus(
+            "attack ring",
+            { diameter: 0.85, thickness: 0.06, tessellation: 32 },
+            scene,
+          ),
+          attackMaterial,
+          root,
+          false,
+        );
+        ring.position.copyFrom(marker.position.add(new Vector3(0, 0.035, 0)));
+        markers.push(ring);
+      }
+      for (const tile of getReachableTiles(state, selected)) {
         const marker = box("legal move", 0.85, 0.018, 0.85, moveMaterial);
         marker.position.copyFrom(tilePoint(tile).add(new Vector3(0, 0.015, 0)));
         markers.push(marker);
@@ -355,14 +485,76 @@ export function createWorld(
       }
     }
   };
-  const move = (path: Position[]) =>
+  const move = (unitId: string, path: Position[]) =>
     new Promise<void>((resolve) => {
+      const warrior = warriors.get(unitId)!;
       animation = {
+        unitId,
         path: [warrior.position.clone(), ...path.map(tilePoint)],
         started: performance.now(),
         done: resolve,
       };
     });
+  const tween = (duration: number, frame: (t: number) => void) =>
+    new Promise<void>((resolve) => {
+      const started = performance.now();
+      const observer = scene.onBeforeRenderObservable.add(() => {
+        const t = Math.min(1, (performance.now() - started) / duration);
+        frame(t);
+        if (t === 1) {
+          scene.onBeforeRenderObservable.remove(observer);
+          resolve();
+        }
+      });
+    });
+  const combat = async (
+    before: GameState,
+    after: GameState,
+    result: CombatPreview,
+  ) => {
+    combatAnimating = true;
+    const attacker = warriors.get(result.attackerId)!;
+    const defender = warriors.get(result.defenderId)!;
+    const start = attacker.position.clone();
+    const target = defender.position.clone();
+    const direction = target.subtract(start).normalize();
+    attacker.rotation.y = Math.atan2(direction.x, direction.z) + Math.PI;
+    await tween(260, (t) => {
+      attacker.position.copyFrom(
+        start.add(direction.scale(Math.sin(t * Math.PI) * 0.42)),
+      );
+      defender.rotation.z = Math.sin(t * Math.PI) * 0.18;
+    });
+    if (result.retaliation) {
+      await tween(230, (t) => {
+        defender.position.copyFrom(
+          target.subtract(direction.scale(Math.sin(t * Math.PI) * 0.32)),
+        );
+        attacker.rotation.z = -Math.sin(t * Math.PI) * 0.18;
+      });
+    }
+    for (const unit of before.units.filter(
+      (unit) => !after.units.some((next) => next.id === unit.id),
+    )) {
+      const model = warriors.get(unit.id)!;
+      await tween(300, (t) => {
+        model.scaling.setAll(1 - t);
+        model.rotation.z = (t * Math.PI) / 2;
+      });
+      model.dispose();
+      warriors.delete(unit.id);
+      ownerRings.delete(unit.id);
+      healthLabels.get(unit.id)?.dispose();
+      healthLabels.delete(unit.id);
+    }
+    if (result.advance) await move(result.attackerId, [result.advance]);
+    for (const unit of after.units) {
+      const model = warriors.get(unit.id)!;
+      model.position.copyFrom(tilePoint(unit));
+      model.rotation.z = 0;
+    }
+    combatAnimating = false;
+  };
   const project = (position: Position, height = 0.04) => {
     scene.updateTransformMatrix(true);
     const point = Vector3.Project(
@@ -384,6 +576,7 @@ export function createWorld(
   engine.runRenderLoop(() => {
     const now = performance.now();
     if (animation) {
+      const warrior = warriors.get(animation.unitId)!;
       const elapsed = (now - animation.started) / 440;
       const segment = Math.min(Math.floor(elapsed), animation.path.length - 2);
       const t = Math.min(1, elapsed - segment);
@@ -400,8 +593,12 @@ export function createWorld(
         done();
       }
     }
-    halo.setEnabled(selected);
-    halo.position.copyFrom(warrior.position.add(new Vector3(0, 0.025, 0)));
+    const selectedWarrior = selected ? warriors.get(selected) : undefined;
+    halo.setEnabled(!!selectedWarrior);
+    if (selectedWarrior)
+      halo.position.copyFrom(
+        selectedWarrior.position.add(new Vector3(0, 0.025, 0)),
+      );
     halo.scaling.setAll(1 + Math.sin(now / 330) * 0.025);
     scene.render();
   });
@@ -409,21 +606,27 @@ export function createWorld(
     rebuild,
     update,
     move,
+    combat,
     project,
-    isAnimating: () => animation !== null,
-    getVisualPosition: () => ({
-      x: warrior.position.x + 4.5,
-      y: warrior.position.z + 4.5,
-      elevation: warrior.position.y,
-    }),
-    getMarkerCount: () => markers.length / 2,
+    isAnimating: () => animation !== null || combatAnimating,
+    getVisualPosition: (unitId: string) => {
+      const warrior = warriors.get(unitId);
+      if (!warrior) throw new Error("Unknown visual unit");
+      return {
+        x: warrior.position.x + (currentState.width - 1) / 2,
+        y: warrior.position.z + (currentState.height - 1) / 2,
+        elevation: warrior.position.y,
+      };
+    },
+    getMarkerCount: () =>
+      markers.filter((mesh) => mesh.name === "legal move").length,
     getHoveredTile: () => hoveredKey,
     resetCamera: () => {
       camera.inertialAlphaOffset = 0;
       camera.inertialBetaOffset = 0;
       camera.alpha = -Math.PI / 4;
       camera.beta = 0.83;
-      zoom = 8.1;
+      zoom = defaultZoom;
       resize();
     },
     dispose: () => {

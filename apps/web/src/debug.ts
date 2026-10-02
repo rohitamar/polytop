@@ -4,19 +4,22 @@ import type {
   Tile,
   Unit,
   ReachableTile,
+  Player,
 } from "@reach/game-core";
 
 export interface GameDebug {
   getState(): GameState;
   getUnits(): Unit[];
+  getActivePlayer(): Player;
+  getTurnNumber(): number;
   getTile(x: number, y: number): Tile | undefined;
   setSeed(seed: string): void;
-  getReachableTiles(): ReachableTile[];
+  getReachableTiles(unitId?: string): ReachableTile[];
   getSelectedUnitId(): string | null;
   getTileScreenPosition(x: number, y: number): Position;
-  getUnitScreenPosition(): Position;
+  getUnitScreenPosition(unitId?: string): Position;
   isAnimating(): boolean;
-  getVisualPosition(): Position & { elevation: number };
+  getVisualPosition(unitId?: string): Position & { elevation: number };
   getMarkerCount(): number;
   getHoveredTile(): string;
 }

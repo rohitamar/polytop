@@ -40,7 +40,13 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
     .toBe("6,5");
   await page.screenshot({ path: testInfo.outputPath("01-selected-map.png") });
   await page.evaluate(() => {
-    const samples: { animating: boolean; x: number; elevation: number }[] = [];
+    const samples: {
+      animating: boolean;
+      x: number;
+      elevation: number;
+      turnLocked: boolean;
+      turnNumber: number;
+    }[] = [];
     (
       window as unknown as { animationSamples: typeof samples }
     ).animationSamples = samples;
@@ -48,6 +54,12 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
       const debug = window.__GAME_DEBUG__!;
       samples.push({
         animating: debug.isAnimating(),
+        turnLocked: (
+          document.querySelector(
+            'button[aria-label="End Turn"]',
+          ) as HTMLButtonElement
+        ).disabled,
+        turnNumber: debug.getTurnNumber(),
         ...debug.getVisualPosition(),
       });
       if (
@@ -73,6 +85,8 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
             animating: boolean;
             x: number;
             elevation: number;
+            turnLocked: boolean;
+            turnNumber: number;
           }[];
         }
       ).animationSamples,
@@ -85,6 +99,11 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
         sample.x < 6 &&
         sample.elevation > 0.14,
     ),
+  ).toBe(true);
+  expect(
+    samples
+      .filter((sample) => sample.animating)
+      .every((sample) => sample.turnLocked && sample.turnNumber === 1),
   ).toBe(true);
   const state = await page.evaluate(() => window.__GAME_DEBUG__!.getState());
   expect(state.units[0]).toMatchObject({ x: 6, y: 5, movement: 0 });
@@ -115,7 +134,7 @@ test("rejects blocked moves, protects debug snapshots, resets seed and supports 
       (tile) =>
         tile.x > 2 &&
         tile.x < 7 &&
-        tile.y > 2 &&
+        tile.y > 5 &&
         tile.y < 7 &&
         tile.terrain === "water",
     ) ?? before.tiles.find((tile) => tile.terrain === "water")!;

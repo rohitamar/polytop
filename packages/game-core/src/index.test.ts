@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAction,
+  warriorStats,
   createGame,
   getReachableTiles,
   getTile,
@@ -16,16 +17,36 @@ function fixture(): GameState {
     height: 5,
     revision: 0,
     activePlayerId: "p1",
+    players: [
+      { id: "p1", name: "One" },
+      { id: "p2", name: "Two" },
+    ],
+    turnNumber: 1,
     tiles: Array.from({ length: 25 }, (_, i) => ({
       x: i % 5,
       y: Math.floor(i / 5),
       terrain: "grass",
     })),
-    units: [{ id: "u1", ownerId: "p1", x: 2, y: 2, movement: 2 }],
+    units: [
+      {
+        ...warriorStats,
+        hp: 10,
+        hasAttacked: false,
+        id: "u1",
+        ownerId: "p1",
+        x: 2,
+        y: 2,
+        movement: 2,
+        maxMovement: 2,
+      },
+    ],
   };
 }
 
-const action = (x: number, y: number): GameAction => ({
+const action = (
+  x: number,
+  y: number,
+): Extract<GameAction, { type: "move" }> => ({
   type: "move",
   playerId: "p1",
   unitId: "u1",
@@ -36,7 +57,8 @@ describe("seeded world", () => {
   it("reproduces the same complete state from a seed", () => {
     expect(createGame("island")).toEqual(createGame("island"));
     expect(createGame("island").tiles).not.toEqual(createGame("other").tiles);
-    expect(createGame().tiles).toHaveLength(100);
+    expect(createGame()).toMatchObject({ width: 20, height: 20 });
+    expect(createGame().tiles).toHaveLength(400);
   });
   it("always gives the warrior a playable start", () => {
     for (let i = 0; i < 50; i++) {
@@ -92,7 +114,17 @@ describe("weighted movement", () => {
   );
   it("blocks occupied destinations and passage through occupied tiles", () => {
     const state = fixture();
-    state.units.push({ id: "u2", ownerId: "p1", x: 3, y: 2, movement: 2 });
+    state.units.push({
+      ...warriorStats,
+      hp: 10,
+      hasAttacked: false,
+      id: "u2",
+      ownerId: "p1",
+      x: 3,
+      y: 2,
+      movement: 2,
+      maxMovement: 2,
+    });
     expect(() => applyAction(state, action(3, 2))).toThrow("Unreachable");
     expect(() => applyAction(state, action(4, 2))).toThrow("Unreachable");
   });
