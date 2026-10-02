@@ -882,3 +882,12 @@ footer i {
     right: 210px;
   }
 }
+
+.expedition-card { max-height: calc(100vh - 330px); overflow-y: auto; }
+.city-info > button { margin-top: 6px; }
+.worker-list { max-height: 210px; overflow-y: auto; }
+.worker-tile { display: flex; gap: 8px; align-items: center; padding: 7px 4px; border-bottom: 1px solid #bcc8b8; }
+.worker-tile.worked { background: #dce7cf; }
+.worker-tile span { flex: 1; text-transform: capitalize; font-size: 12px; }
+.worker-tile small { display: block; font-size: 10px; margin-top: 3px; }
+.worker-tile button { width: auto; font-size: 11px; padding: 6px; }

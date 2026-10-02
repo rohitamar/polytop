@@ -439,7 +439,7 @@ export function createWorld(
     currentState = state;
     selected = selectedUnitId;
     for (const city of state.cities) {
-      const signature = `${city.ownerId}:${city.level}`;
+      const signature = `${city.ownerId}:${city.townHallLevel}`;
       if (cityModels.get(city.id)?.signature === signature) continue;
       cityModels.get(city.id)?.node.dispose();
       const node = new TransformNode(city.id, scene);
@@ -450,7 +450,7 @@ export function createWorld(
       const roof = index < 0 ? neutral : accents[index];
       const plaza = box("city plaza", 0.88, 0.06, 0.88, snow, node);
       plaza.position.y = 0.03;
-      for (let i = 0; i < city.level; i++) {
+      for (let i = 0; i < city.townHallLevel; i++) {
         const x = -0.27 + i * 0.25;
         const height = 0.28 + i * 0.13;
         const house = box("city house", 0.21, height, 0.25, armor, node);

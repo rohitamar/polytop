@@ -2,8 +2,12 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   applyAction,
-  getIncome,
-  cityEconomy,
+  economy,
+  getCityPopulation,
+  getWorkableTiles,
+  getProduction,
+  positionKey,
+  type GameAction,
   getUpgradeCost,
   getAttackTargets,
   previewCombat,
@@ -136,6 +140,19 @@ function App() {
       (player) => player.id === next.activePlayerId,
     )!;
     setNotice(`${player.name}'s turn. Select your warrior to move.`);
+  };
+
+  const cityAction = (action: GameAction) => {
+    if (busy.current) return;
+    try {
+      const next = applyAction(stateRef.current, action);
+      stateRef.current = next;
+      setState(next);
+      world.current?.update(next, selection.current);
+      setNotice("City economy updated. Production arrives at the start of your next turn.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Action rejected");
+    }
   };
 
   const attack = async () => {
@@ -366,62 +383,40 @@ function App() {
           <span className="player-dot" />
         </div>
         <div className="card-rule" />
-        <div className="stat-row">
-          <span>Stars</span>
-          <b data-testid="stars">{activePlayer.stars}</b>
-        </div>
-        <div className="stat-row">
-          <span>Income per turn</span>
-          <b data-testid="income">+{getIncome(state, activePlayer.id)}</b>
-        </div>
+        {(["gold", "food", "wood", "steel"] as const).map(resource => (
+          <div className="stat-row" key={resource}>
+            <span>{resource[0].toUpperCase() + resource.slice(1)}</span>
+            <b data-testid={resource}>{activePlayer.resources[resource]} <i> / +{getProduction(state, activePlayer.id)[resource]} per turn</i></b>
+          </div>
+        ))}
         {city && (
           <div className="city-info" aria-label="Selected city">
             <div className="card-rule" />
-            <div className="eyebrow">
-              CITY &middot;{" "}
-              {state.players.find((player) => player.id === city.ownerId)
-                ?.name ?? "Neutral"}
+            <div className="eyebrow">CITY · {state.players.find(player => player.id === city.ownerId)?.name ?? "Neutral"}</div>
+            <div className="stat-row"><span>Town Hall</span><b data-testid="town-hall">{city.townHallLevel} / {economy.maxLevel}</b></div>
+            <div className="stat-row"><span>Population</span><b data-testid="population">{city.population} / {getCityPopulation(state, city).cap}</b></div>
+            <div className="stat-row"><span>Civilians / military</span><b>{getCityPopulation(state, city).civilian} / {getCityPopulation(state, city).military}</b></div>
+            <div className="stat-row"><span>Available civilians</span><b>{getCityPopulation(state, city).available}</b></div>
+            <div className="stat-row"><span>Town Hall income</span><b>+{economy.goldIncome[city.townHallLevel - 1]} Gold</b></div>
+            {city.ownerId === activePlayer.id && <>
+              <button disabled={moving || city.population >= getCityPopulation(state, city).cap || activePlayer.resources.food < economy.growthCost}
+                onClick={() => cityAction({ type: "GROW_POPULATION", playerId: activePlayer.id, cityId: city.id })}>Grow Population · {economy.growthCost} Food</button>
+              {getUpgradeCost(city) !== null ? <button disabled={moving || activePlayer.resources.gold < getUpgradeCost(city)!}
+                onClick={() => cityAction({ type: "UPGRADE_TOWN_HALL", playerId: activePlayer.id, cityId: city.id })}>Upgrade Town Hall · {getUpgradeCost(city)} Gold</button> : <p>Maximum Town Hall level</p>}
+            </>}
+            <p>Resource tiles · 1 civilian per worked tile</p>
+            <div className="worker-list">
+              {getWorkableTiles(state, city.id).map(tile => {
+                const worked = city.workedTiles.includes(positionKey(tile));
+                const yieldRule = economy.yields[tile.resource!];
+                return <div className={`worker-tile ${worked ? "worked" : ""}`} key={positionKey(tile)}>
+                  <span>{tile.resource} ({tile.x + 1}, {tile.y + 1})<small>{worked ? "Worked" : "Unworked"} · +{yieldRule.amount} {yieldRule.resource} per turn when worked</small></span>
+                  {city.ownerId === activePlayer.id && <button aria-label={`${worked ? "Remove" : "Assign"} worker ${positionKey(tile)}`}
+                    disabled={moving || (!worked && getCityPopulation(state, city).available <= 0)}
+                    onClick={() => cityAction({ type: worked ? "UNASSIGN_WORKER" : "ASSIGN_WORKER", playerId: activePlayer.id, cityId: city.id, tile })}>{worked ? "Remove" : "Assign"}</button>}
+                </div>;
+              })}
             </div>
-            <div className="stat-row">
-              <span>Level</span>
-              <b>
-                {city.level} / {cityEconomy.maxLevel}
-              </b>
-            </div>
-            <div className="stat-row">
-              <span>City income</span>
-              <b>+{city.income} stars</b>
-            </div>
-            {getUpgradeCost(city) !== null ? (
-              <div className="stat-row">
-                <span>Upgrade cost</span>
-                <b>{getUpgradeCost(city)} stars</b>
-              </div>
-            ) : (
-              <p>Maximum level</p>
-            )}
-            {city.ownerId === activePlayer.id &&
-              getUpgradeCost(city) !== null && (
-                <button
-                  disabled={
-                    moving || activePlayer.stars < getUpgradeCost(city)!
-                  }
-                  onClick={() => {
-                    if (busy.current) return;
-                    const next = applyAction(stateRef.current, {
-                      type: "UPGRADE_CITY",
-                      playerId: stateRef.current.activePlayerId,
-                      cityId: city.id,
-                    });
-                    stateRef.current = next;
-                    setState(next);
-                    world.current?.update(next, selection.current);
-                    setNotice("City upgraded. More income arrives next turn.");
-                  }}
-                >
-                  Upgrade City
-                </button>
-              )}
           </div>
         )}
         <div className="stat-row">
@@ -517,7 +512,7 @@ function App() {
             <div className="unit-meta">
               <span className="health-line" />{" "}
               <span>
-                {unit.hp} / {unit.maxHp} HP
+                {unit.hp} / {unit.maxHp} HP · {unit.populationCost} military population
               </span>
               <span className="meta-divider" />
               <span className="movement-pips">
@@ -627,8 +622,7 @@ function App() {
           </p>
           <p>
             Enter a city to claim it. Click a city to inspect or upgrade it.
-            Owned cities pay stars at the start of your turn; upgrades increase
-            future income.
+            Town Halls generate Gold. Assign civilians to resource tiles, then spend Food to grow population or Gold to upgrade the Town Hall.
           </p>
           <ul>
             <li>Grass costs 1 point.</li>

@@ -18,8 +18,8 @@ function fixture(): GameState {
     revision: 0,
     activePlayerId: "p1",
     players: [
-      { id: "p1", name: "One", stars: 0 },
-      { id: "p2", name: "Two", stars: 0 },
+      { id: "p1", name: "One", resources: { gold: 0, food: 0, wood: 0, steel: 0 } },
+      { id: "p2", name: "Two", resources: { gold: 0, food: 0, wood: 0, steel: 0 } },
     ],
     turnNumber: 1,
     tiles: Array.from({ length: 25 }, (_, i) => ({

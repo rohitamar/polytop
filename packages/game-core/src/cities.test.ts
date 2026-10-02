@@ -13,7 +13,7 @@ const upgrade = (
   state: GameState,
   cityId = "city-1",
   playerId = state.activePlayerId,
-) => applyAction(state, { type: "UPGRADE_CITY", playerId, cityId });
+) => applyAction(state, { type: "UPGRADE_TOWN_HALL", playerId, cityId });
 const move = (state: GameState, x = 5, y = 5) =>
   applyAction(state, {
     type: "move",
@@ -42,7 +42,7 @@ describe("cities and economy", () => {
           state.cities.filter((city) => city.ownerId === player.id),
         ).toHaveLength(1);
         expect(getIncome(state, player.id)).toBe(2);
-        expect(player.stars).toBe(player.id === state.activePlayerId ? 2 : 0);
+        expect(player.resources.gold).toBe(player.id === state.activePlayerId ? 2 : 0);
       }
     },
   );
@@ -55,9 +55,9 @@ describe("cities and economy", () => {
       captured.cities.find((city) => city.id === "neutral-1")?.ownerId,
     ).toBe("player-1");
     expect(getIncome(captured, "player-1")).toBe(4);
-    expect(captured.players[0].stars).toBe(2);
-    expect(end(captured).players.map((player) => player.stars)).toEqual([2, 2]);
-    expect(end(end(captured)).players.map((player) => player.stars)).toEqual([
+    expect(captured.players[0].resources.gold).toBe(2);
+    expect(end(captured).players.map((player) => player.resources.gold)).toEqual([2, 2]);
+    expect(end(end(captured)).players.map((player) => player.resources.gold)).toEqual([
       6, 2,
     ]);
     expect(initial).toEqual(snapshot);
@@ -69,19 +69,19 @@ describe("cities and economy", () => {
       ...initial.cities[1],
       x: 5,
       y: 5,
-      level: 3,
-      income: 6,
+      townHallLevel: 3,
+      population: 3,
     };
     initial.cities = initial.cities.filter((city) => city.id !== "neutral-1");
     const captured = move(initial);
     expect(captured.cities[1]).toMatchObject({
       ownerId: "player-1",
-      level: 3,
-      income: 6,
+      townHallLevel: 3,
+      population: 3,
     });
     expect(getIncome(captured, "player-2")).toBe(0);
-    expect(end(captured).players[1].stars).toBe(0);
-    expect(end(end(captured)).players[0].stars).toBe(10);
+    expect(end(captured).players[1].resources.gold).toBe(0);
+    expect(end(end(captured)).players[0].resources.gold).toBe(9);
   });
 
   it("captures every city entered along an accepted movement path", () => {
@@ -108,14 +108,14 @@ describe("cities and economy", () => {
   it("charges centralized upgrade costs and pays the new income next turn", () => {
     const initial = end(end(createGame()));
     const next = upgrade(initial);
-    expect(initial.players[0].stars).toBe(4);
-    expect(next.players[0].stars).toBe(0);
-    expect(next.cities[0]).toMatchObject({ level: 2, income: 4 });
+    expect(initial.players[0].resources.gold).toBe(4);
+    expect(next.players[0].resources.gold).toBe(0);
+    expect(next.cities[0]).toMatchObject({ townHallLevel: 2, population: 3 });
     expect(getUpgradeCost(next.cities[0])).toBe(8);
-    const funded = end(end(end(end(next))));
+    const funded = end(end(end(end(end(end(next))))));
     const max = upgrade(funded);
-    expect(max.players[0].stars).toBe(0);
-    expect(max.cities[0]).toMatchObject({ level: 3, income: 6 });
+    expect(max.players[0].resources.gold).toBe(1);
+    expect(max.cities[0]).toMatchObject({ townHallLevel: 3, population: 3 });
     expect(getUpgradeCost(max.cities[0])).toBeNull();
     expect(() => upgrade(max)).toThrow("maximum");
     expect(next.revision).toBe(initial.revision + 1);
@@ -147,12 +147,12 @@ describe("cities and economy", () => {
       const before = state;
       state = end(state);
       for (const player of state.players)
-        expect(player.stars).toBe(
-          before.players.find((p) => p.id === player.id)!.stars +
+        expect(player.resources.gold).toBe(
+          before.players.find((p) => p.id === player.id)!.resources.gold +
             (player.id === state.activePlayerId ? 2 : 0),
         );
     }
     expect(state.activePlayerId).toBe("player-1");
-    expect(state.players[0].stars).toBe(4);
+    expect(state.players[0].resources.gold).toBe(4);
   });
 });

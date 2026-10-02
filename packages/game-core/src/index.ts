@@ -1,30 +1,67 @@
 export type Terrain = "grass" | "forest" | "mountain" | "water";
 export type Position = { x: number; y: number };
-export type Tile = Position & { terrain: Terrain };
-export type Player = { id: string; name: string; stars: number };
+export type Resource = "gold" | "food" | "wood" | "steel";
+export type Resources = Record<Resource, number>;
+export type Opportunity = "orchard" | "wheat" | "fishery" | "forest" | "mine";
+export type Tile = Position & { terrain: Terrain; resource?: Opportunity };
+export type Player = { id: string; name: string; resources: Resources };
 export type City = Position & {
   id: string;
   ownerId: string | null;
-  level: number;
-  income: number;
+  townHallLevel: number;
+  population: number;
+  workedTiles: string[];
 };
-export const cityEconomy = {
-  income: [2, 4, 6],
+export const economy = {
+  goldIncome: [2, 3, 5],
+  populationCaps: [5, 8, 12],
   upgradeCosts: [4, 8],
   maxLevel: 3,
+  growthCost: 4,
+  startingPopulation: 3,
+  workRadius: 2,
+  yields: {
+    orchard: { resource: "food", amount: 2 },
+    wheat: { resource: "food", amount: 3 },
+    fishery: { resource: "food", amount: 2 },
+    forest: { resource: "wood", amount: 2 },
+    mine: { resource: "steel", amount: 2 },
+  },
 } as const;
+export const emptyResources = (): Resources => ({ gold: 0, food: 0, wood: 0, steel: 0 });
 export const getIncome = (state: GameState, playerId: string) =>
-  state.cities.reduce(
-    (total, city) => total + (city.ownerId === playerId ? city.income : 0),
-    0,
-  );
+  state.cities.reduce((total, city) => total + (city.ownerId === playerId ? economy.goldIncome[city.townHallLevel - 1] : 0), 0);
 export const getUpgradeCost = (city: City) =>
-  city.level >= cityEconomy.maxLevel
-    ? null
-    : (cityEconomy.upgradeCosts[city.level - 1] ?? null);
+  city.townHallLevel >= economy.maxLevel ? null : economy.upgradeCosts[city.townHallLevel - 1];
+export function getCityPopulation(state: GameState, city: City) {
+  const military = state.units.filter(unit => unit.homeCityId === city.id).reduce((total, unit) => total + unit.populationCost, 0);
+  const civilian = city.population - military;
+  return { total: city.population, military, civilian, available: civilian - city.workedTiles.length, cap: economy.populationCaps[city.townHallLevel - 1] };
+}
+export function getWorkableTiles(state: GameState, cityId: string): Tile[] {
+  return state.tiles.filter(tile => {
+    if (!tile.resource || state.cities.some(city => positionKey(city) === positionKey(tile))) return false;
+    const nearest = state.cities.filter(city => Math.abs(city.x - tile.x) + Math.abs(city.y - tile.y) <= economy.workRadius)
+      .sort((a, b) => (Math.abs(a.x - tile.x) + Math.abs(a.y - tile.y)) - (Math.abs(b.x - tile.x) + Math.abs(b.y - tile.y)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return nearest[0]?.id === cityId;
+  });
+}
+export function getProduction(state: GameState, playerId: string): Resources {
+  const result = { ...emptyResources(), gold: getIncome(state, playerId) };
+  for (const city of state.cities.filter(city => city.ownerId === playerId)) {
+    for (const tile of getWorkableTiles(state, city.id)) {
+      if (!city.workedTiles.includes(positionKey(tile))) continue;
+      const yieldRule = economy.yields[tile.resource!];
+      result[yieldRule.resource] += yieldRule.amount;
+    }
+  }
+  return result;
+}
 export type Unit = Position & {
   id: string;
   ownerId: string;
+  homeCityId: string | null;
+  populationCost: number;
   movement: number;
   maxMovement: number;
   hp: number;
@@ -54,11 +91,12 @@ export type GameAction =
       to: Position;
     }
   | { type: "ATTACK_UNIT"; playerId: string; unitId: string; targetId: string }
-  | { type: "UPGRADE_CITY"; playerId: string; cityId: string }
+  | { type: "UPGRADE_TOWN_HALL" | "GROW_POPULATION"; playerId: string; cityId: string }
+  | { type: "ASSIGN_WORKER" | "UNASSIGN_WORKER"; playerId: string; cityId: string; tile: Position }
   | { type: "END_TURN"; playerId: string };
 export type ReachableTile = Position & { cost: number; path: Position[] };
 
-export const warriorStats = { maxHp: 10, attack: 2, defense: 2, range: 1 };
+export const warriorStats = { homeCityId: null as string | null, populationCost: 1, maxHp: 10, attack: 2, defense: 2, range: 1 };
 
 export const movementCost: Record<Terrain, number> = {
   grass: 1,
@@ -100,8 +138,9 @@ export function createGame(seed = "fern-104", playerCount = 2): GameState {
       ...position,
       id: `city-${i + 1}`,
       ownerId: `player-${i + 1}`,
-      level: 1,
-      income: cityEconomy.income[0],
+      townHallLevel: 1,
+      population: economy.startingPopulation,
+      workedTiles: [],
     })),
     ...[
       { x: 5, y: 5 },
@@ -112,8 +151,9 @@ export function createGame(seed = "fern-104", playerCount = 2): GameState {
       ...position,
       id: `neutral-${i + 1}`,
       ownerId: null,
-      level: 1,
-      income: cityEconomy.income[0],
+      townHallLevel: 1,
+      population: economy.startingPopulation,
+      workedTiles: [],
     })),
   ];
   const width = 20;
@@ -144,7 +184,7 @@ export function createGame(seed = "fern-104", playerCount = 2): GameState {
         cities.some((p) => p.x === x && p.y === y)
       )
         terrain = "grass";
-      tiles.push({ x, y, terrain });
+      tiles.push({ x, y, terrain, resource: cities.some(city => city.x === x && city.y === y) ? undefined : terrain === "forest" ? "forest" : terrain === "mountain" ? "mine" : terrain === "water" ? "fishery" : (x + y) % 2 === 0 ? "orchard" : "wheat" });
     }
   }
   return {
@@ -165,7 +205,7 @@ export function createGame(seed = "fern-104", playerCount = 2): GameState {
         "Roseward",
         "Stoneward",
       ][i],
-      stars: i === 0 ? cityEconomy.income[0] : 0,
+      resources: { ...emptyResources(), gold: i === 0 ? economy.goldIncome[0] : 0 },
     })),
     cities,
     turnNumber: 1,
@@ -177,6 +217,7 @@ export function createGame(seed = "fern-104", playerCount = 2): GameState {
       movement: i === 0 ? 2 : 0,
       maxMovement: 2,
       ...warriorStats,
+      homeCityId: `city-${i + 1}`,
       hp: warriorStats.maxHp,
       hasAttacked: false,
     })),
@@ -305,7 +346,10 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     action.type !== "move" &&
     action.type !== "ATTACK_UNIT" &&
     action.type !== "END_TURN" &&
-    action.type !== "UPGRADE_CITY"
+    action.type !== "UPGRADE_TOWN_HALL" &&
+    action.type !== "GROW_POPULATION" &&
+    action.type !== "ASSIGN_WORKER" &&
+    action.type !== "UNASSIGN_WORKER"
   )
     throw new Error("Unknown action");
   const playerIndex = state.players.findIndex(
@@ -322,7 +366,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       activePlayerId: nextPlayer.id,
       players: state.players.map((player) =>
         player.id === nextPlayer.id
-          ? { ...player, stars: player.stars + getIncome(state, player.id) }
+          ? { ...player, resources: Object.fromEntries(Object.entries(getProduction(state, player.id)).map(([key, value]) => [key, player.resources[key as Resource] + value])) as Resources }
           : player,
       ),
       units: state.units.map((unit) =>
@@ -332,32 +376,37 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       ),
     };
   }
-  if (action.type === "UPGRADE_CITY") {
-    const city = state.cities.find((city) => city.id === action.cityId);
-    if (!city || city.ownerId !== action.playerId)
-      throw new Error("Not your city");
-    const cost = getUpgradeCost(city);
-    if (cost === null) throw new Error("City is at maximum level");
-    if (state.players[playerIndex].stars < cost)
-      throw new Error("Not enough stars");
-    return {
-      ...state,
-      revision: state.revision + 1,
-      players: state.players.map((player) =>
-        player.id === action.playerId
-          ? { ...player, stars: player.stars - cost }
-          : player,
-      ),
-      cities: state.cities.map((candidate) =>
-        candidate.id === city.id
-          ? {
-              ...candidate,
-              level: city.level + 1,
-              income: cityEconomy.income[city.level],
-            }
-          : candidate,
-      ),
-    };
+  if ("cityId" in action) {
+    const city = state.cities.find(city => city.id === action.cityId);
+    if (!city || city.ownerId !== action.playerId) throw new Error("Not your city");
+    const updated = { ...city, workedTiles: [...city.workedTiles] };
+    const resources = { ...state.players[playerIndex].resources };
+    if (action.type === "UPGRADE_TOWN_HALL") {
+      const cost = getUpgradeCost(city);
+      if (cost === null) throw new Error("Town Hall is at maximum level");
+      if (resources.gold < cost) throw new Error("Not enough Gold");
+      resources.gold -= cost;
+      updated.townHallLevel++;
+    } else if (action.type === "GROW_POPULATION") {
+      if (city.population >= getCityPopulation(state, city).cap) throw new Error("Population at cap");
+      if (resources.food < economy.growthCost) throw new Error("Not enough Food");
+      resources.food -= economy.growthCost;
+      updated.population++;
+    } else if ("tile" in action) {
+      const key = positionKey(action.tile);
+      if (!getWorkableTiles(state, city.id).some(tile => positionKey(tile) === key)) throw new Error("Tile is not workable by this city");
+      if (action.type === "ASSIGN_WORKER") {
+        if (city.workedTiles.includes(key)) throw new Error("Tile already worked");
+        if (getCityPopulation(state, city).available <= 0) throw new Error("No available civilians");
+        updated.workedTiles.push(key);
+      } else {
+        if (!city.workedTiles.includes(key)) throw new Error("Tile is not worked");
+        updated.workedTiles = updated.workedTiles.filter(tile => tile !== key);
+      }
+    }
+    return { ...state, revision: state.revision + 1,
+      players: state.players.map(player => player.id === action.playerId ? { ...player, resources } : player),
+      cities: state.cities.map(candidate => candidate.id === city.id ? updated : candidate) };
   }
   const capture = (positions: Position[]) =>
     state.cities.map((city) =>
@@ -378,7 +427,9 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     return {
       ...state,
       revision: state.revision + 1,
-      cities: capture(result.advance ? [result.advance] : []),
+      cities: capture(result.advance ? [result.advance] : []).map(city => ({ ...city,
+        population: city.population - state.units.filter(candidate => candidate.homeCityId === city.id && ((candidate.id === result.attackerId && result.attackerHp === 0) || (candidate.id === result.defenderId && result.defenderHp === 0))).reduce((total, candidate) => total + candidate.populationCost, 0),
+      })),
       units: state.units
         .map((candidate) =>
           candidate.id === unit.id

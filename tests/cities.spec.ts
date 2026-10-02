@@ -1,48 +1,44 @@
 import { expect, test } from "@playwright/test";
 import "../apps/web/src/debug";
 
-test("capture a city, collect income and upgrade", async ({
-  page,
-}, testInfo) => {
+test("work tiles, collect resources, grow population and upgrade Town Hall", async ({ page }, testInfo) => {
   await page.goto("/");
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
-  await expect(page.getByTestId("stars")).toHaveText("2");
-  const warrior = await page.evaluate(() =>
-    window.__GAME_DEBUG__!.getUnitScreenPosition("warrior-1"),
-  );
-  await page.mouse.click(warrior.x, warrior.y);
-  const city = await page.evaluate(() =>
-    window.__GAME_DEBUG__!.getTileScreenPosition(5, 5),
-  );
-  await page.mouse.click(city.x, city.y);
-  await expect
-    .poll(() => page.evaluate(() => window.__GAME_DEBUG__!.isAnimating()))
-    .toBe(false);
-  expect(
-    await page.evaluate(
-      () =>
-        window
-          .__GAME_DEBUG__!.getState()
-          .cities.find((city) => city.id === "neutral-1")?.ownerId,
-    ),
-  ).toBe("player-1");
-  await expect(page.getByTestId("income")).toHaveText("+4");
-  await expect(
-    page.getByRole("button", { name: "Upgrade City" }),
-  ).toBeDisabled();
-  await page.getByRole("button", { name: "End Turn", exact: true }).click();
-  await expect(page.getByTestId("stars")).toHaveText("2");
-  await page.getByRole("button", { name: "End Turn", exact: true }).click();
-  await expect(page.getByTestId("stars")).toHaveText("6");
-  const point = await page.evaluate(() =>
-    window.__GAME_DEBUG__!.getTileScreenPosition(4, 5),
-  );
-  await page.mouse.click(point.x, point.y);
-  await page.getByRole("button", { name: "Upgrade City" }).click();
-  await expect(page.getByTestId("stars")).toHaveText("2");
-  await expect(page.getByTestId("income")).toHaveText("+6");
-  expect(
-    await page.evaluate(() => window.__GAME_DEBUG__!.getState().cities[0]),
-  ).toMatchObject({ level: 2, income: 4 });
+  await page.evaluate(() => window.__GAME_DEBUG__!.setSeed("fern-104"));
+  const selectCity = async () => {
+    const point = await page.evaluate(() => window.__GAME_DEBUG__!.getUnitScreenPosition("warrior-1"));
+    await page.mouse.click(point.x, point.y);
+    await expect(page.getByTestId("population")).toBeVisible();
+  };
+  await selectCity();
+  await expect(page.getByTestId("population")).toHaveText("3 / 5");
+  await expect(page.getByText("Civilians / military")).toBeVisible();
+  await page.getByRole("button", { name: "Assign worker 4,3", exact: true }).click();
+  expect(await page.evaluate(() => window.__GAME_DEBUG__!.getState().cities[0].workedTiles)).toEqual(["4,3"]);
+  await page.getByRole("button", { name: "Assign worker 4,4", exact: true }).click();
+  const turn = page.getByRole("button", { name: "End Turn", exact: true });
+  await turn.click();
+  await turn.click();
+  await selectCity();
+  await expect(page.getByTestId("food")).toContainText("3");
+  await expect(page.getByTestId("wood")).toContainText("2");
+  await turn.click();
+  await turn.click();
+  await selectCity();
+  await page.getByRole("button", { name: "Grow Population" }).click();
+  await expect(page.getByTestId("population")).toHaveText("4 / 5");
+  await page.getByRole("button", { name: "Upgrade Town Hall" }).click();
+  await expect(page.getByTestId("population")).toHaveText("4 / 8");
+  await expect(page.getByTestId("town-hall")).toHaveText("2 / 3");
+  const state = await page.evaluate(() => window.__GAME_DEBUG__!.getState());
+  expect(state.players[0].resources).toEqual({ gold: 2, food: 2, wood: 4, steel: 0 });
+  expect(state.units[0]).toMatchObject({ homeCityId: "city-1", populationCost: 1 });
+  await page.getByRole("button", { name: "Remove worker 4,3", exact: true }).click();
+  expect(await page.evaluate(() => window.__GAME_DEBUG__!.getState().cities[0].workedTiles)).toEqual(["4,4"]);
+  await turn.click();
+  await turn.click();
+  const produced = await page.evaluate(() => window.__GAME_DEBUG__!.getState().players[0].resources);
+  expect(produced).toEqual({ gold: 5, food: 2, wood: 6, steel: 0 });
+  await selectCity();
   await page.screenshot({ path: testInfo.outputPath("city-economy.png") });
 });
