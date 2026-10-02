@@ -634,7 +634,23 @@ footer i {
     right: 25px;
   }
 }
+.restart-expedition {
+  position: absolute;
+  right: 36px;
+  bottom: 61px;
+  border: 0;
+  background: transparent;
+  color: #48665d;
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 @media (max-width: 650px) {
+  .restart-expedition {
+    right: auto;
+    left: 15px;
+    bottom: 55px;
+  }
   main {
     min-height: 700px;
   }

@@ -1,22 +1,32 @@
 export type Terrain = "grass" | "forest" | "mountain" | "water";
 export type Position = { x: number; y: number };
 export type Tile = Position & { terrain: Terrain };
-export type Unit = Position & { id: string; ownerId: string; movement: number };
+export type Player = { id: string; name: string };
+export type Unit = Position & {
+  id: string;
+  ownerId: string;
+  movement: number;
+  maxMovement: number;
+};
 export type GameState = {
   seed: string;
   width: number;
   height: number;
   revision: number;
   activePlayerId: string;
+  players: Player[];
+  turnNumber: number;
   tiles: Tile[];
   units: Unit[];
 };
-export type GameAction = {
-  type: "move";
-  playerId: string;
-  unitId: string;
-  to: Position;
-};
+export type GameAction =
+  | {
+      type: "move";
+      playerId: string;
+      unitId: string;
+      to: Position;
+    }
+  | { type: "END_TURN"; playerId: string };
 export type ReachableTile = Position & { cost: number; path: Position[] };
 
 export const movementCost: Record<Terrain, number> = {
@@ -60,6 +70,7 @@ export function createGame(seed = "fern-104"): GameState {
                 : "grass";
       if (Math.abs(x - 4) + Math.abs(y - 5) <= 2) terrain = "grass";
       if (x === 4 && y === 4) terrain = "forest";
+      if (Math.abs(x - 7) + Math.abs(y - 3) <= 1) terrain = "grass";
       tiles.push({ x, y, terrain });
     }
   }
@@ -69,8 +80,30 @@ export function createGame(seed = "fern-104"): GameState {
     height: 10,
     revision: 0,
     activePlayerId: "player-1",
+    players: [
+      { id: "player-1", name: "Sunward" },
+      { id: "player-2", name: "Tideward" },
+    ],
+    turnNumber: 1,
     tiles,
-    units: [{ id: "warrior-1", ownerId: "player-1", x: 4, y: 5, movement: 2 }],
+    units: [
+      {
+        id: "warrior-1",
+        ownerId: "player-1",
+        x: 4,
+        y: 5,
+        movement: 2,
+        maxMovement: 2,
+      },
+      {
+        id: "warrior-2",
+        ownerId: "player-2",
+        x: 7,
+        y: 3,
+        movement: 0,
+        maxMovement: 2,
+      },
+    ],
   };
 }
 
@@ -79,7 +112,7 @@ export function getReachableTiles(
   unitId: string,
 ): ReachableTile[] {
   const unit = state.units.find((candidate) => candidate.id === unitId);
-  if (!unit) return [];
+  if (!unit || unit.ownerId !== state.activePlayerId) return [];
   const start: ReachableTile = { x: unit.x, y: unit.y, cost: 0, path: [] };
   const visited = new Map<string, ReachableTile>([[positionKey(start), start]]);
   const queue = [start];
@@ -124,7 +157,27 @@ export function getReachableTiles(
 }
 
 export function applyAction(state: GameState, action: GameAction): GameState {
-  if (action.type !== "move") throw new Error("Unknown action");
+  if (action.type !== "move" && action.type !== "END_TURN")
+    throw new Error("Unknown action");
+  const playerIndex = state.players.findIndex(
+    (player) => player.id === action.playerId,
+  );
+  if (playerIndex < 0 || action.playerId !== state.activePlayerId)
+    throw new Error("Not your turn");
+  if (action.type === "END_TURN") {
+    const nextPlayer = state.players[(playerIndex + 1) % state.players.length];
+    return {
+      ...state,
+      revision: state.revision + 1,
+      turnNumber: state.turnNumber + 1,
+      activePlayerId: nextPlayer.id,
+      units: state.units.map((unit) =>
+        unit.ownerId === nextPlayer.id
+          ? { ...unit, movement: unit.maxMovement }
+          : unit,
+      ),
+    };
+  }
   const unit = state.units.find((candidate) => candidate.id === action.unitId);
   if (!unit) throw new Error("Unknown unit");
   if (

@@ -16,16 +16,26 @@ function fixture(): GameState {
     height: 5,
     revision: 0,
     activePlayerId: "p1",
+    players: [
+      { id: "p1", name: "One" },
+      { id: "p2", name: "Two" },
+    ],
+    turnNumber: 1,
     tiles: Array.from({ length: 25 }, (_, i) => ({
       x: i % 5,
       y: Math.floor(i / 5),
       terrain: "grass",
     })),
-    units: [{ id: "u1", ownerId: "p1", x: 2, y: 2, movement: 2 }],
+    units: [
+      { id: "u1", ownerId: "p1", x: 2, y: 2, movement: 2, maxMovement: 2 },
+    ],
   };
 }
 
-const action = (x: number, y: number): GameAction => ({
+const action = (
+  x: number,
+  y: number,
+): Extract<GameAction, { type: "move" }> => ({
   type: "move",
   playerId: "p1",
   unitId: "u1",
@@ -92,7 +102,14 @@ describe("weighted movement", () => {
   );
   it("blocks occupied destinations and passage through occupied tiles", () => {
     const state = fixture();
-    state.units.push({ id: "u2", ownerId: "p1", x: 3, y: 2, movement: 2 });
+    state.units.push({
+      id: "u2",
+      ownerId: "p1",
+      x: 3,
+      y: 2,
+      movement: 2,
+      maxMovement: 2,
+    });
     expect(() => applyAction(state, action(3, 2))).toThrow("Unreachable");
     expect(() => applyAction(state, action(4, 2))).toThrow("Unreachable");
   });

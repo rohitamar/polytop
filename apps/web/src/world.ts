@@ -24,7 +24,9 @@ import {
   type GameState,
   type Position,
   type Tile,
+  type Unit,
 } from "@reach/game-core";
+import { playerStyle } from "./player-style";
 
 export type World = ReturnType<typeof createWorld>;
 
@@ -112,7 +114,12 @@ export function createWorld(
   const rock = material("slate", "#89968e");
   const snow = material("chalk", "#e5e9d5");
   const gold = material("brass", "#d9ab58");
-  const cloak = material("saffron", "#e78848");
+  const accents = [0, 1].map((index) =>
+    material(`player-${index}`, playerStyle(index).accent),
+  );
+  const ringMaterials = [0, 1].map((index) =>
+    material(`ring-${index}`, playerStyle(index).ring),
+  );
   const armor = material("ivory", "#ece5c9");
   const dark = material("ink", "#344f50");
   const face = material("skin", "#dca778");
@@ -127,7 +134,9 @@ export function createWorld(
   let decorations: Mesh[] = [];
   let markers: Mesh[] = [];
   let currentState: GameState;
-  let selected = false;
+  let selected: string | null = null;
+  const warriors = new Map<string, TransformNode>();
+  const ownerRings = new Map<string, Mesh>();
   const tileHeight = (tile?: Tile) =>
     tile?.terrain === "water" ? -0.12 : 0.13;
   const tilePoint = (p: Position) =>
@@ -184,42 +193,59 @@ export function createWorld(
   );
   floor.position.y = -1.15;
   floor.receiveShadows = true;
-  const warrior = new TransformNode("warrior", scene);
-  for (const x of [-0.12, 0.12]) {
-    const boot = box("boot", 0.16, 0.17, 0.23, dark, warrior);
-    boot.position.set(x, 0.12, -0.02);
-  }
-  const body = cone("tunic", 0.43, 0.43, armor, warrior, 0.33);
-  body.position.y = 0.4;
-  const cape = box("cape", 0.39, 0.47, 0.1, cloak, warrior);
-  cape.position.set(0, 0.42, 0.17);
-  cape.rotation.x = -0.2;
-  const head = solid(
-    CreateSphere("head", { diameter: 0.3, segments: 4 }, scene),
-    face,
-    warrior,
-  );
-  head.position.y = 0.78;
-  const helmet = cone("helmet", 0.23, 0.39, armor, warrior, 0.22);
-  helmet.position.y = 0.9;
-  const plume = box("plume", 0.08, 0.24, 0.22, cloak, warrior);
-  plume.position.y = 1.09;
-  const visor = box("visor", 0.24, 0.055, 0.07, dark, warrior);
-  visor.position.set(0, 0.8, -0.145);
-  const shield = cone("shield", 0.1, 0.43, gold, warrior, 0.43);
-  shield.rotation.x = Math.PI / 2;
-  shield.position.set(-0.29, 0.44, -0.11);
-  const emblem = box("shield emblem", 0.05, 0.22, 0.12, armor, warrior);
-  emblem.position.set(-0.29, 0.44, -0.15);
-  const blade = box("blade", 0.075, 0.53, 0.065, snow, warrior);
-  blade.position.set(0.3, 0.58, -0.05);
-  blade.rotation.z = -0.15;
-  const guard = box("guard", 0.23, 0.065, 0.08, gold, warrior);
-  guard.position.set(0.26, 0.34, -0.05);
-  for (const mesh of warrior.getChildMeshes()) {
-    mesh.isPickable = true;
-    mesh.metadata = { unit: true };
-  }
+  const createWarrior = (unit: Unit, playerIndex: number) => {
+    const warrior = new TransformNode(unit.id, scene);
+    const cloak = accents[playerIndex % accents.length];
+    for (const x of [-0.12, 0.12]) {
+      const boot = box("boot", 0.16, 0.17, 0.23, dark, warrior);
+      boot.position.set(x, 0.12, -0.02);
+    }
+    const body = cone("tunic", 0.43, 0.43, armor, warrior, 0.33);
+    body.position.y = 0.4;
+    const cape = box("cape", 0.39, 0.47, 0.1, cloak, warrior);
+    cape.position.set(0, 0.42, 0.17);
+    cape.rotation.x = -0.2;
+    const head = solid(
+      CreateSphere("head", { diameter: 0.3, segments: 4 }, scene),
+      face,
+      warrior,
+    );
+    head.position.y = 0.78;
+    const helmet = cone("helmet", 0.23, 0.39, armor, warrior, 0.22);
+    helmet.position.y = 0.9;
+    const plume = box("plume", 0.08, 0.24, 0.22, cloak, warrior);
+    plume.position.y = 1.09;
+    const visor = box("visor", 0.24, 0.055, 0.07, dark, warrior);
+    visor.position.set(0, 0.8, -0.145);
+    const shield = cone("shield", 0.1, 0.43, gold, warrior, 0.43);
+    shield.rotation.x = Math.PI / 2;
+    shield.position.set(-0.29, 0.44, -0.11);
+    const emblem = box("shield emblem", 0.05, 0.22, 0.12, armor, warrior);
+    emblem.position.set(-0.29, 0.44, -0.15);
+    const blade = box("blade", 0.075, 0.53, 0.065, snow, warrior);
+    blade.position.set(0.3, 0.58, -0.05);
+    blade.rotation.z = -0.15;
+    const guard = box("guard", 0.23, 0.065, 0.08, gold, warrior);
+    guard.position.set(0.26, 0.34, -0.05);
+    for (const mesh of warrior.getChildMeshes()) {
+      mesh.isPickable = true;
+      mesh.metadata = { unitId: unit.id };
+    }
+    const ring = solid(
+      CreateTorus(
+        `owner-${unit.id}`,
+        { diameter: 0.66, thickness: 0.035, tessellation: 32 },
+        scene,
+      ),
+      ringMaterials[playerIndex % ringMaterials.length],
+      warrior,
+      false,
+    );
+    ring.position.y = 0.024;
+    ownerRings.set(unit.id, ring);
+    warriors.set(unit.id, warrior);
+    warrior.position.copyFrom(tilePoint(unit));
+  };
   const halo = solid(
     CreateTorus(
       "selected unit",
@@ -232,8 +258,12 @@ export function createWorld(
   );
   const hover = box("hover", 0.95, 0.014, 0.95, hoverMaterial);
   hover.setEnabled(false);
-  let animation: { path: Vector3[]; started: number; done: () => void } | null =
-    null;
+  let animation: {
+    unitId: string;
+    path: Vector3[];
+    started: number;
+    done: () => void;
+  } | null = null;
   let hoveredKey = "";
   scene.onPointerObservable.add((info) => {
     if (
@@ -243,10 +273,12 @@ export function createWorld(
       return;
     const pick = scene.pick(scene.pointerX, scene.pointerY);
     const metadata = pick?.pickedMesh?.metadata;
-    const tile = metadata?.unit
+    const pickedUnit = currentState?.units.find(
+      (unit) => unit.id === metadata?.unitId,
+    );
+    const tile = pickedUnit
       ? currentState?.tiles.find(
-          (t) =>
-            t.x === currentState.units[0].x && t.y === currentState.units[0].y,
+          (t) => t.x === pickedUnit.x && t.y === pickedUnit.y,
         )
       : (metadata?.tile as Tile | undefined);
     if (info.type === PointerEventTypes.POINTERMOVE) {
@@ -258,7 +290,12 @@ export function createWorld(
       hover.setEnabled(!!tile);
       if (tile)
         hover.position.copyFrom(tilePoint(tile).add(new Vector3(0, 0.027, 0)));
-      canvas.style.cursor = tile ? "pointer" : "grab";
+      canvas.style.cursor =
+        pickedUnit && pickedUnit.ownerId !== currentState.activePlayerId
+          ? "not-allowed"
+          : tile
+            ? "pointer"
+            : "grab";
     } else if (tile && (info.event as PointerEvent).button === 0) onClick(tile);
   });
   const rebuild = (state: GameState) => {
@@ -328,15 +365,29 @@ export function createWorld(
         ...(scene.meshes.filter((mesh) => !before.has(mesh)) as Mesh[]),
       );
     }
-    warrior.position.copyFrom(tilePoint(state.units[0]));
+    for (const warrior of warriors.values()) warrior.dispose();
+    warriors.clear();
+    ownerRings.clear();
+    for (const unit of state.units)
+      createWarrior(
+        unit,
+        state.players.findIndex((player) => player.id === unit.ownerId),
+      );
+    hover.setEnabled(false);
+    hoveredKey = "";
   };
-  const update = (state: GameState, isSelected: boolean) => {
+  const update = (state: GameState, selectedUnitId: string | null) => {
     currentState = state;
-    selected = isSelected;
+    selected = selectedUnitId;
+    for (const unit of state.units) {
+      const ring = ownerRings.get(unit.id);
+      if (ring)
+        ring.visibility = unit.ownerId === state.activePlayerId ? 1 : 0.35;
+    }
     markers.forEach((mesh) => mesh.dispose());
     markers = [];
     if (selected) {
-      for (const tile of getReachableTiles(state, state.units[0].id)) {
+      for (const tile of getReachableTiles(state, selected)) {
         const marker = box("legal move", 0.85, 0.018, 0.85, moveMaterial);
         marker.position.copyFrom(tilePoint(tile).add(new Vector3(0, 0.015, 0)));
         markers.push(marker);
@@ -355,9 +406,11 @@ export function createWorld(
       }
     }
   };
-  const move = (path: Position[]) =>
+  const move = (unitId: string, path: Position[]) =>
     new Promise<void>((resolve) => {
+      const warrior = warriors.get(unitId)!;
       animation = {
+        unitId,
         path: [warrior.position.clone(), ...path.map(tilePoint)],
         started: performance.now(),
         done: resolve,
@@ -384,6 +437,7 @@ export function createWorld(
   engine.runRenderLoop(() => {
     const now = performance.now();
     if (animation) {
+      const warrior = warriors.get(animation.unitId)!;
       const elapsed = (now - animation.started) / 440;
       const segment = Math.min(Math.floor(elapsed), animation.path.length - 2);
       const t = Math.min(1, elapsed - segment);
@@ -400,8 +454,12 @@ export function createWorld(
         done();
       }
     }
-    halo.setEnabled(selected);
-    halo.position.copyFrom(warrior.position.add(new Vector3(0, 0.025, 0)));
+    const selectedWarrior = selected ? warriors.get(selected) : undefined;
+    halo.setEnabled(!!selectedWarrior);
+    if (selectedWarrior)
+      halo.position.copyFrom(
+        selectedWarrior.position.add(new Vector3(0, 0.025, 0)),
+      );
     halo.scaling.setAll(1 + Math.sin(now / 330) * 0.025);
     scene.render();
   });
@@ -411,11 +469,15 @@ export function createWorld(
     move,
     project,
     isAnimating: () => animation !== null,
-    getVisualPosition: () => ({
-      x: warrior.position.x + 4.5,
-      y: warrior.position.z + 4.5,
-      elevation: warrior.position.y,
-    }),
+    getVisualPosition: (unitId: string) => {
+      const warrior = warriors.get(unitId);
+      if (!warrior) throw new Error("Unknown visual unit");
+      return {
+        x: warrior.position.x + 4.5,
+        y: warrior.position.z + 4.5,
+        elevation: warrior.position.y,
+      };
+    },
     getMarkerCount: () => markers.length / 2,
     getHoveredTile: () => hoveredKey,
     resetCamera: () => {
