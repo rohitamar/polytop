@@ -845,3 +845,40 @@ footer i {
     padding: 12px;
   }
 }
+
+.city-info {
+  margin-top: 12px;
+}
+.city-info button {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #bcc8b8;
+  border-radius: 5px;
+  background: #234c45;
+  color: #f6f3e8;
+  font: inherit;
+  cursor: pointer;
+}
+.city-info button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.map-tools.city-open {
+  right: 330px;
+}
+@media (min-width: 1650px) {
+  .map-tools.city-open {
+    right: 350px;
+  }
+}
+@media (max-width: 1050px) {
+  .map-tools.city-open {
+    right: 250px;
+  }
+}
+@media (max-width: 650px) {
+  .map-tools.city-open {
+    right: 210px;
+  }
+}

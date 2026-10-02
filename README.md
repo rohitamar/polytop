@@ -31,7 +31,7 @@ In restricted environments, use `npm install --cache .npm-cache`. Set `PLAYWRIGH
 
 `packages/game-core` owns deterministic seeded terrain generation, weighted shortest paths, occupancy, ownership, turn validation and immutable state transitions. `applyAction(state, action)` returns a new state or throws for an illegal action without partial mutation. Cardinal movement uses Dijkstra traversal, allowing grass at cost 1 and forest at cost 2; mountains and water are impassable. Accepted moves deduct their path cost.
 
-Game state holds an ordered player roster, activePlayerId, turnNumber and per-unit ownerId, movement and maxMovement. Existing `move` actions remain compatible. `{ type: 'END_TURN', playerId }` requires the active player's identity, advances to the next roster entry, increments revision and turnNumber, and refills only that player's units. Turn 1 is the initial player's turn; each handoff increments it, including wraparound. Inactive units can retain unspent points but cannot act. The second player's initial movement is zero until its first turn starts. Roster cycling is tested for 1, 2, 3 and 8 players; the scenario and visual palette are currently for two.
+Game state holds an ordered player roster, activePlayerId, turnNumber and per-unit ownerId, movement and maxMovement. Existing `move` actions remain compatible. `{ type: 'END_TURN', playerId }` requires the active player's identity, advances to the next roster entry, increments revision and turnNumber, and refills only that player's units. Turn 1 is the initial player's turn; each handoff increments it, including wraparound. Inactive units can retain unspent points but cannot act. The second player's initial movement is zero until its first turn starts. Roster cycling is tested for 1, 2, 3 and 8 players; createGame(seed, playerCount) supports 2-8 deterministic starting positions and owner colors. The UI defaults to two players.
 
 `apps/web` owns React overlays and Babylon rendering. Input submits actions through core; accepted state is stored immediately while the renderer animates the accepted path for the unit ID. Movement, selection changes, resets and End Turn are locked during movement and combat animations. Handoffs clear selection and movement highlights. Visual positions, owner colors, camera motion and selection are presentation state. The local pass-and-play adapter submits as the active player; a future server must instead bind actions to authenticated identity.
 
@@ -57,8 +57,14 @@ Damage is `max(1, round(5 × attack × currentHP / maxHP / max(1, targetDefense)
 
 The board shows owner colors, HP labels, golden movement tiles and red attack targets. Combat confirmation can be canceled without changing game state. All gameplay input and resets remain locked through combat and movement animations. Empty armies display a restart prompt; turn order continues to follow the full player roster.
 
-## Scope and next milestone
+## Cities and economy
 
-This is a desktop-first local pass-and-play slice with two placeholder warriors, a 20×20 map (400 tiles), and an expedition reset, plus a separate 2–8 player multiplayer lobby. Health, melee combat and retaliation are deterministic rules. Synchronized gameplay, cities, resources, technology, accounts, matchmaking, persistence and fog of war are intentionally absent. The existing Babylon bundle-size build warning remains nonblocking.
+Each player starts with a level 1 city beneath their warrior; four neutral cities occupy fixed grass tiles. Entering a city on an accepted movement path transfers ownership immediately, including cities crossed en route and lethal combat advances. Occupied enemy tiles still require combat. Capture retains level and income and never grants stars immediately.
 
-Future work can add authenticated, revision-checked gameplay actions through the server and shared game-core. This milestone stops at rooms and lobby membership.
+Players hold stars. Income is derived from their owned cities and paid only at the start of that owner's turn, including turn 1. Level 1/2/3 cities generate 2/4/6 stars per turn. Upgrades cost 4 stars for level 2 and 8 for level 3, with all values centralized in cityEconomy. UPGRADE_CITY validates the active owner, level and funds before returning an immutable state. Upgrades increase future income without paying it immediately.
+
+Click a city to inspect its owner, level, income and upgrade cost. When a warrior is selected, a reachable city click moves and captures; deselect with Escape to inspect without moving. The owning active player can upgrade an affordable city. City roofs and banners show owner colors; additional houses show levels. Turn handoff clears selection and animation blocks upgrades.
+
+## Scope and limitations
+
+This is a desktop-first local pass-and-play slice on a 20 x 20 map. The core setup supports 2-8 players; the UI launches two. City locations are deterministic test positions rather than balanced procedural expansion placement, and distant cities are not guaranteed reachable for every terrain seed. There is no recruitment, siege, technology, multiplayer, accounts, persistence or fog of war. Existing empty-army restart messaging remains; cities do not create units or change victory rules. The Babylon bundle-size build warning remains nonblocking.
