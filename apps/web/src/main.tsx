@@ -1,3 +1,4 @@
+import type { LobbyClientMessage, LobbyServerMessage } from "@reach/protocol";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -59,6 +60,65 @@ function App() {
   const world = useRef<World | null>(null);
   const [state, setState] = useState<GameState>(() => createGame());
   const stateRef = useRef(state);
+  const network = useRef<{ playerId: string; send: (message: LobbyClientMessage) => Promise<void> } | null>(null);
+  const networkMatch = useRef(false);
+  const [networked, setNetworked] = useState(false);
+  const connectionReady = useRef(true);
+  const [connected, setConnected] = useState(true);
+  const [waiting, setWaiting] = useState(false);
+  const canAct = !networked || connected && network.current?.playerId === state.activePlayerId;
+  const submit = (action: GameAction) => {
+    if (!network.current || !networkMatch.current) return false;
+    if (busy.current || !connectionReady.current) return true;
+    const { playerId: ignored, ...intent } = action;
+    if (intent.type === "move") intent.to = { x: intent.to.x, y: intent.to.y };
+    if (intent.type === "ASSIGN_WORKER" || intent.type === "UNASSIGN_WORKER") intent.tile = { x: intent.tile.x, y: intent.tile.y };
+    busy.current = true;
+    setWaiting(true);
+    void network.current.send({ type: "GAME_ACTION", requestId: crypto.randomUUID(), expectedRevision: stateRef.current.revision, action: intent }).catch(error => {
+      busy.current = false;
+      setWaiting(false);
+      setNotice(error.message);
+    });
+    return true;
+  };
+  const matchQueue = useRef(Promise.resolve());
+  const receiveMatch = (message: Extract<LobbyServerMessage, { type: "MATCH_STATE" }>) => {
+    networkMatch.current = true;
+    setNetworked(true);
+    connectionReady.current = true;
+    setConnected(true);
+    matchQueue.current = matchQueue.current.then(async () => {
+      const previous = stateRef.current;
+      const next = message.state;
+      busy.current = true;
+      setWaiting(false);
+      setMoving(true);
+      stateRef.current = next;
+      setState(next);
+      clearTarget();
+      selection.current = null;
+      setSelected(null);
+      setSelectedCityId(null);
+      if (!message.action) world.current?.rebuild(next);
+      world.current?.update(next, null);
+      if (message.action?.type === "move") {
+        const action = message.action;
+        const destination = getReachableTiles(previous, action.unitId).find(tile => tile.x === action.to.x && tile.y === action.to.y);
+        if (destination) await world.current?.move(action.unitId, destination.path);
+      } else if (message.action?.type === "ATTACK_UNIT") {
+        await world.current?.combat(previous, next, previewCombat(previous, message.action.unitId, message.action.targetId));
+      }
+      world.current?.update(next, null);
+      busy.current = false;
+      setMoving(false);
+      setNotice(`${next.players.find(player => player.id === next.activePlayerId)!.name}'s turn.`);
+    }).catch(error => {
+      busy.current = false;
+      setMoving(false);
+      setNotice(String(error));
+    });
+  };
   const selection = useRef<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const busy = useRef(false);
@@ -109,7 +169,7 @@ function App() {
       value &&
       !stateRef.current.units.some(
         (unit) =>
-          unit.id === value && unit.ownerId === stateRef.current.activePlayerId,
+          unit.id === value && unit.ownerId === stateRef.current.activePlayerId && (!networkMatch.current || network.current?.playerId === unit.ownerId),
       )
     )
       return;
@@ -121,7 +181,7 @@ function App() {
     world.current?.update(stateRef.current, value);
   };
   const reset = (seed = stateRef.current.seed) => {
-    if (busy.current) return;
+    if (busy.current || networkMatch.current) return;
     stateRef.current = createGame(seed);
     setState(stateRef.current);
     select(null);
@@ -131,6 +191,7 @@ function App() {
   };
   const endTurn = () => {
     if (busy.current) return;
+    if (submit({ type: "END_TURN", playerId: stateRef.current.activePlayerId })) return;
     const next = applyAction(stateRef.current, {
       type: "END_TURN",
       playerId: stateRef.current.activePlayerId,
@@ -146,6 +207,7 @@ function App() {
 
   const cityAction = (action: GameAction) => {
     if (busy.current) return;
+    if (submit(action)) return;
     try {
       const next = applyAction(stateRef.current, action);
       stateRef.current = next;
@@ -161,6 +223,7 @@ function App() {
     if (busy.current || !selection.current || !targetRef.current) return;
     const current = stateRef.current;
     const result = previewCombat(current, selection.current, targetRef.current);
+    if (submit({ type: "ATTACK_UNIT", playerId: current.activePlayerId, unitId: result.attackerId, targetId: result.defenderId })) return;
     const next = applyAction(current, {
       type: "ATTACK_UNIT",
       playerId: current.activePlayerId,
@@ -196,6 +259,7 @@ function App() {
     const click = async (position: Position) => {
       if (busy.current) return;
       const current = stateRef.current;
+      if (networkMatch.current && (!connectionReady.current || network.current?.playerId !== current.activePlayerId)) { setNotice("Wait for your turn."); return; }
       const clickedCity = current.cities.find(
         (city) => city.x === position.x && city.y === position.y,
       );
@@ -253,6 +317,7 @@ function App() {
         setNotice("Beyond your reach. Choose a highlighted tile.");
         return;
       }
+      if (submit({ type: "move", playerId: current.activePlayerId, unitId: warrior.id, to: position })) return;
       const next = applyAction(current, {
         type: "move",
         playerId: current.activePlayerId,
@@ -350,12 +415,21 @@ function App() {
         aria-label="Interactive 3D expedition map. Click the warrior, then a highlighted tile to move."
       />
       <header className="topbar">
-        <Lobby />
+        <Lobby onMatch={receiveMatch} onSession={(playerId, send) => { network.current = { playerId, send }; }} onEnd={(reason, ended) => {
+          busy.current = false;
+          setWaiting(false);
+          setNotice(reason);
+          if (ended) {
+            connectionReady.current = false;
+            setConnected(false);
+            select(null);
+          }
+        }} />
         <a className="brand" href="/" aria-label="react-polytop home">
           <span>react-polytop</span>
         </a>
         <div className="chapter">
-          <span className="live-dot" /> LOCAL EXPEDITION{" "}
+          <span className="live-dot" /> {networked ? "MULTIPLAYER MATCH" : "LOCAL EXPEDITION"}{" "}
           <span className="divider" /> TURN {state.turnNumber}
         </div>
         <button
@@ -382,7 +456,7 @@ function App() {
             <strong data-testid="active-player">
               The {activePlayer.name} Company
             </strong>
-            <small>Player {activePlayerIndex + 1} · Local pass-and-play</small>
+            <small>Player {activePlayerIndex + 1} · {networked ? (canAct ? "Your turn" : "Waiting for your turn") : "Local pass-and-play"}</small>
           </div>
           <span className="player-dot" />
         </div>
@@ -403,9 +477,9 @@ function App() {
             <div className="stat-row"><span>Available civilians</span><b>{getCityPopulation(state, city).available}</b></div>
             <div className="stat-row"><span>Town Hall income</span><b>+{economy.goldIncome[city.townHallLevel - 1]} Gold</b></div>
             {city.ownerId === activePlayer.id && <>
-              <button disabled={moving || city.population >= getCityPopulation(state, city).cap || activePlayer.resources.food < economy.growthCost}
+              <button disabled={moving || waiting || !canAct || city.population >= getCityPopulation(state, city).cap || activePlayer.resources.food < economy.growthCost}
                 onClick={() => cityAction({ type: "GROW_POPULATION", playerId: activePlayer.id, cityId: city.id })}>Grow Population · {economy.growthCost} Food</button>
-              {getUpgradeCost(city) !== null ? <button disabled={moving || activePlayer.resources.gold < getUpgradeCost(city)!}
+              {getUpgradeCost(city) !== null ? <button disabled={moving || waiting || !canAct || activePlayer.resources.gold < getUpgradeCost(city)!}
                 onClick={() => cityAction({ type: "UPGRADE_TOWN_HALL", playerId: activePlayer.id, cityId: city.id })}>Upgrade Town Hall · {getUpgradeCost(city)} Gold</button> : <p>Maximum Town Hall level</p>}
             </>}
             <p>Resource tiles · 1 civilian per worked tile</p>
@@ -416,7 +490,7 @@ function App() {
                 return <div className={`worker-tile ${worked ? "worked" : ""}`} key={positionKey(tile)}>
                   <span>{tile.resource} ({tile.x + 1}, {tile.y + 1})<small>{worked ? "Worked" : "Unworked"} · +{yieldRule.amount} {yieldRule.resource} per turn when worked</small></span>
                   {city.ownerId === activePlayer.id && <button aria-label={`${worked ? "Remove" : "Assign"} worker ${positionKey(tile)}`}
-                    disabled={moving || (!worked && getCityPopulation(state, city).available <= 0)}
+                    disabled={moving || waiting || !canAct || (!worked && getCityPopulation(state, city).available <= 0)}
                     onClick={() => cityAction({ type: worked ? "UNASSIGN_WORKER" : "ASSIGN_WORKER", playerId: activePlayer.id, cityId: city.id, tile })}>{worked ? "Remove" : "Assign"}</button>}
                 </div>;
               })}
@@ -531,7 +605,7 @@ function App() {
           </div>
           <button
             className="select-button"
-            disabled={moving}
+            disabled={moving || waiting || !canAct}
             onClick={() => {
               if (busy.current) return;
               select(unit.id);
@@ -560,10 +634,10 @@ function App() {
           <small>
             {combat.damage} damage · {combat.retaliation} retaliation
           </small>
-          <button onClick={attack} disabled={moving}>
+          <button onClick={attack} disabled={moving || waiting || !canAct}>
             Attack
           </button>
-          <button onClick={clearTarget} disabled={moving}>
+          <button onClick={clearTarget} disabled={moving || waiting || !canAct}>
             Cancel
           </button>
         </section>
@@ -581,7 +655,7 @@ function App() {
       <button
         className="restart"
         onClick={endTurn}
-        disabled={moving || failed}
+        disabled={moving || waiting || !canAct || failed}
         aria-label="End Turn"
       >
         <Icon name="arrow" />
@@ -595,7 +669,7 @@ function App() {
       <button
         className="restart-expedition"
         onClick={() => reset()}
-        disabled={moving}
+        disabled={networked || moving}
       >
         Restart expedition
       </button>

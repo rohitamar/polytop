@@ -1,3 +1,4 @@
+import { applyAction, createGame, type GameState } from "@reach/game-core";
 import { randomInt, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
@@ -11,7 +12,7 @@ import {
 } from "@reach/protocol";
 
 type Member = { socket: WebSocket; player: LobbyPlayer };
-type Room = { code: string; members: Member[] };
+type Room = { code: string; members: Member[]; state?: GameState };
 
 export function createLobbyServer() {
   const rooms = new Map<string, Room>();
@@ -46,6 +47,16 @@ export function createLobbyServer() {
   const leave = (socket: WebSocket) => {
     const room = memberships.get(socket);
     if (!room) return;
+    if (room.state) {
+      for (const member of room.members) {
+        memberships.delete(member.socket);
+        send(member.socket, { type: "MATCH_ENDED", message: "A player disconnected. The match has ended." });
+      }
+      rooms.delete(room.code);
+      room.state = undefined;
+      room.members = [];
+      return;
+    }
     memberships.delete(socket);
     room.members = room.members.filter((member) => member.socket !== socket);
     if (room.members.length) broadcast(room);
@@ -79,6 +90,35 @@ export function createLobbyServer() {
         send(socket, { type: "LEFT_ROOM" });
         return;
       }
+      if (message.type === "START_MATCH" || message.type === "GAME_ACTION") {
+        const room = memberships.get(socket);
+        const member = room?.members.find(member => member.socket === socket);
+        try {
+          if (!room || !member) throw new Error("Join a room first");
+          if (message.type === "START_MATCH") {
+            if (room.members[0] !== member) throw new Error("Only the host can start the match");
+            if (room.state) throw new Error("Match already started");
+            if (room.members.length < 2) throw new Error("At least two players are required");
+            const initial = createGame("fern-104", room.members.length);
+            const ids = new Map(initial.players.map((player, i) => [player.id, room.members[i].player.id]));
+            room.state = { ...initial, activePlayerId: member.player.id,
+              players: initial.players.map((player, i) => ({ ...player, id: room.members[i].player.id, name: room.members[i].player.name })),
+              units: initial.units.map(unit => ({ ...unit, ownerId: ids.get(unit.ownerId)! })),
+              cities: initial.cities.map(city => ({ ...city, ownerId: city.ownerId ? ids.get(city.ownerId)! : null })) };
+            for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: room.state, action: null });
+          } else {
+            if (!room.state) throw new Error("Match has not started");
+            if (message.expectedRevision !== room.state.revision) throw new Error("State changed. Try again.");
+            const action = { ...message.action, playerId: member.player.id };
+            room.state = applyAction(room.state, action);
+            for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: room.state, action });
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "Action rejected";
+          send(socket, message.type === "GAME_ACTION" ? { type: "ACTION_REJECTED", requestId: message.requestId, message: reason } : { type: "LOBBY_ERROR", code: "MATCH_ERROR", message: reason });
+        }
+        return;
+      }
       if (memberships.has(socket)) {
         send(socket, {
           type: "LOBBY_ERROR",
@@ -107,6 +147,10 @@ export function createLobbyServer() {
             code: "ROOM_NOT_FOUND",
             message: "That room does not exist.",
           });
+          return;
+        }
+        if (existing.state) {
+          send(socket, { type: "LOBBY_ERROR", code: "MATCH_ERROR", message: "This match has already started." });
           return;
         }
         if (existing.members.length >= ROOM_CAPACITY) {

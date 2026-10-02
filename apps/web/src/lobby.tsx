@@ -1,12 +1,21 @@
+import { setPlayerColors } from "./player-style";
 import { useEffect, useRef, useState } from "react";
 import {
   ROOM_CAPACITY,
   type LobbyClientMessage,
   type LobbyRoom,
+  type LobbyServerMessage,
 } from "@reach/protocol";
 import { connectLobby } from "./lobby-client";
 
-export function Lobby() {
+export function Lobby({ onMatch, onSession, onEnd }: {
+  onMatch: (message: Extract<LobbyServerMessage, { type: "MATCH_STATE" }>) => void;
+  onSession: (playerId: string, send: (message: LobbyClientMessage) => Promise<void>) => void;
+  onEnd: (reason: string, ended?: boolean) => void;
+}) {
+  const callbacks = useRef({ onMatch, onSession, onEnd });
+  callbacks.current = { onMatch, onSession, onEnd };
+  const [inMatch, setInMatch] = useState(false);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -41,19 +50,34 @@ export function Lobby() {
             finish();
             if (response.type === "LOBBY_UPDATE") {
               setRoom(response.room);
+              setPlayerColors(response.room.players);
               setPlayerId(response.playerId);
+              callbacks.current.onSession(response.playerId, message => client.current!.send(message));
+            }
+            if (response.type === "MATCH_STATE") {
+              setInMatch(true);
+              setOpen(false);
+              callbacks.current.onMatch(response);
+            }
+            if (response.type === "ACTION_REJECTED") callbacks.current.onEnd(response.message);
+            if (response.type === "MATCH_ENDED") {
+              setInMatch(false);
+              setRoom(null);
+              callbacks.current.onEnd(response.message, true);
             }
             if (response.type === "LEFT_ROOM") {
               setRoom(null);
               setPlayerId("");
             }
-            if (response.type === "LOBBY_ERROR") setError(response.message);
+            if (response.type === "LOBBY_ERROR") { setError(response.message); callbacks.current.onEnd(response.message); }
           },
           (reason) => {
             finish();
+            setInMatch(false);
             setRoom(null);
             setPlayerId("");
             setError(reason);
+            callbacks.current.onEnd(reason, true);
             client.current?.dispose();
             client.current = null;
           },
@@ -92,7 +116,7 @@ export function Lobby() {
         <section className="lobby-panel" aria-label="Multiplayer lobby">
           <h2>Gather your company</h2>
           <p>
-            Rooms for 2–8 players. Gameplay remains local in this milestone.
+            Rooms for 2–8 players. The host starts a shared match.
           </p>
           {room ? (
             <>
@@ -138,6 +162,7 @@ export function Lobby() {
                   </li>
                 ))}
               </ul>
+              {room.hostId === playerId && !inMatch && <button disabled={pending || room.players.length < 2} onClick={() => void request({ type: "START_MATCH" })}>Start game</button>}
               <button
                 disabled={pending}
                 onClick={() => void request({ type: "LEAVE_ROOM" })}
