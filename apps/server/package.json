@@ -5,6 +5,15 @@
   "type": "module",
   "dependencies": {
     "@reach/game-core": "*",
-    "@reach/protocol": "*"
+    "@reach/protocol": "*",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
   }
 }

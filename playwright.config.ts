@@ -14,11 +14,16 @@ export default defineConfig({
     trace: "retain-on-failure",
     launchOptions: { args: ["--enable-unsafe-swiftshader"] },
   },
-  webServer: {
+  webServer: [{
     command: `npm run dev -- --strictPort --port ${new URL(baseURL).port}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 60000,
-  },
+  }, {
+    command: "npm run start -w @reach/server",
+    url: "http://127.0.0.1:3001",
+    reuseExistingServer: !process.env.CI,
+    timeout: 60000,
+  }],
   reporter: [["list"], ["html", { open: "never" }]],
 });

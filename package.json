@@ -12,7 +12,8 @@
     "preview": "npm run preview -w @reach/web -- --host 127.0.0.1",
     "build": "tsc --noEmit && npm run build -w @reach/web",
     "test": "vitest run --configLoader runner",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "dev:server": "npm run dev -w @reach/server"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",

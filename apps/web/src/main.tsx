@@ -16,6 +16,7 @@ import {
 } from "@reach/game-core";
 import { createWorld, type World } from "./world";
 import { playerStyle } from "./player-style";
+import { Lobby } from "./lobby";
 import "./debug";
 import "./style.css";
 
@@ -328,6 +329,7 @@ function App() {
         aria-label="Interactive 3D expedition map. Click the warrior, then a highlighted tile to move."
       />
       <header className="topbar">
+        <Lobby />
         <a className="brand" href="/" aria-label="Verdant Reach home">
           <span className="brand-mark">
             <Icon name="compass" />
