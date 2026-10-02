@@ -123,10 +123,10 @@ export function createWorld(
   const rock = material("slate", "#89968e");
   const snow = material("chalk", "#e5e9d5");
   const gold = material("brass", "#d9ab58");
-  const accents = [0, 1].map((index) =>
+  const accents = Array.from({ length: 8 }, (_, i) => i).map((index) =>
     material(`player-${index}`, playerStyle(index).accent),
   );
-  const ringMaterials = [0, 1].map((index) =>
+  const ringMaterials = Array.from({ length: 8 }, (_, i) => i).map((index) =>
     material(`ring-${index}`, playerStyle(index).ring),
   );
   const armor = material("ivory", "#ece5c9");
@@ -146,6 +146,11 @@ export function createWorld(
   let markers: Mesh[] = [];
   let currentState: GameState;
   let selected: string | null = null;
+  const cityModels = new Map<
+    string,
+    { node: TransformNode; signature: string }
+  >();
+  const neutral = material("neutral city", "#89968e");
   const warriors = new Map<string, TransformNode>();
   const healthLabels = new Map<string, DynamicTexture>();
   let combatAnimating = false;
@@ -339,6 +344,8 @@ export function createWorld(
   const rebuild = (state: GameState) => {
     for (const mesh of decorations) mesh.dispose();
     decorations = [];
+    for (const city of cityModels.values()) city.node.dispose();
+    cityModels.clear();
     currentState = state;
     base.scaling.set(state.width + 0.15, 1, state.height + 0.15);
     bottom.scaling.set(state.width - 0.2, 1, state.height - 0.2);
@@ -425,6 +432,40 @@ export function createWorld(
   const update = (state: GameState, selectedUnitId: string | null) => {
     currentState = state;
     selected = selectedUnitId;
+    for (const city of state.cities) {
+      const signature = `${city.ownerId}:${city.level}`;
+      if (cityModels.get(city.id)?.signature === signature) continue;
+      cityModels.get(city.id)?.node.dispose();
+      const node = new TransformNode(city.id, scene);
+      node.position.copyFrom(tilePoint(city));
+      const index = state.players.findIndex(
+        (player) => player.id === city.ownerId,
+      );
+      const roof = index < 0 ? neutral : accents[index];
+      const plaza = box("city plaza", 0.88, 0.06, 0.88, snow, node);
+      plaza.position.y = 0.03;
+      for (let i = 0; i < city.level; i++) {
+        const x = -0.27 + i * 0.25;
+        const height = 0.28 + i * 0.13;
+        const house = box("city house", 0.21, height, 0.25, armor, node);
+        house.position.set(x, height / 2 + 0.06, 0.24);
+        const cap = cone("city roof", 0.17, 0.34, roof, node);
+        cap.position.set(x, height + 0.14, 0.24);
+      }
+      const pole = box("city flagpole", 0.025, 0.75, 0.025, bark, node);
+      pole.position.set(0.32, 0.4, -0.25);
+      const flag = box("city banner", 0.22, 0.16, 0.025, roof, node);
+      flag.position.set(0.23, 0.69, -0.25);
+      for (const mesh of node.getChildMeshes()) {
+        mesh.isPickable = true;
+        mesh.metadata = {
+          tile: state.tiles.find(
+            (tile) => tile.x === city.x && tile.y === city.y,
+          ),
+        };
+      }
+      cityModels.set(city.id, { node, signature });
+    }
     for (const unit of state.units) {
       const texture = healthLabels.get(unit.id);
       if (texture) {

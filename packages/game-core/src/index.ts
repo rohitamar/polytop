@@ -1,7 +1,27 @@
 export type Terrain = "grass" | "forest" | "mountain" | "water";
 export type Position = { x: number; y: number };
 export type Tile = Position & { terrain: Terrain };
-export type Player = { id: string; name: string };
+export type Player = { id: string; name: string; stars: number };
+export type City = Position & {
+  id: string;
+  ownerId: string | null;
+  level: number;
+  income: number;
+};
+export const cityEconomy = {
+  income: [2, 4, 6],
+  upgradeCosts: [4, 8],
+  maxLevel: 3,
+} as const;
+export const getIncome = (state: GameState, playerId: string) =>
+  state.cities.reduce(
+    (total, city) => total + (city.ownerId === playerId ? city.income : 0),
+    0,
+  );
+export const getUpgradeCost = (city: City) =>
+  city.level >= cityEconomy.maxLevel
+    ? null
+    : (cityEconomy.upgradeCosts[city.level - 1] ?? null);
 export type Unit = Position & {
   id: string;
   ownerId: string;
@@ -24,6 +44,7 @@ export type GameState = {
   turnNumber: number;
   tiles: Tile[];
   units: Unit[];
+  cities: City[];
 };
 export type GameAction =
   | {
@@ -33,6 +54,7 @@ export type GameAction =
       to: Position;
     }
   | { type: "ATTACK_UNIT"; playerId: string; unitId: string; targetId: string }
+  | { type: "UPGRADE_CITY"; playerId: string; cityId: string }
   | { type: "END_TURN"; playerId: string };
 export type ReachableTile = Position & { cost: number; path: Position[] };
 
@@ -60,7 +82,40 @@ function randomFromSeed(seed: string) {
   };
 }
 
-export function createGame(seed = "fern-104"): GameState {
+export function createGame(seed = "fern-104", playerCount = 2): GameState {
+  if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > 8)
+    throw new Error("Expected 2-8 players");
+  const starts = [
+    { x: 4, y: 5 },
+    { x: 7, y: 3 },
+    { x: 14, y: 3 },
+    { x: 16, y: 7 },
+    { x: 15, y: 14 },
+    { x: 10, y: 16 },
+    { x: 4, y: 15 },
+    { x: 3, y: 10 },
+  ].slice(0, playerCount);
+  const cities: City[] = [
+    ...starts.map((position, i) => ({
+      ...position,
+      id: `city-${i + 1}`,
+      ownerId: `player-${i + 1}`,
+      level: 1,
+      income: cityEconomy.income[0],
+    })),
+    ...[
+      { x: 5, y: 5 },
+      { x: 10, y: 7 },
+      { x: 12, y: 12 },
+      { x: 7, y: 11 },
+    ].map((position, i) => ({
+      ...position,
+      id: `neutral-${i + 1}`,
+      ownerId: null,
+      level: 1,
+      income: cityEconomy.income[0],
+    })),
+  ];
   const width = 20;
   const height = 20;
   const random = randomFromSeed(seed);
@@ -82,6 +137,13 @@ export function createGame(seed = "fern-104"): GameState {
       if (Math.abs(x - 4) + Math.abs(y - 5) <= 2) terrain = "grass";
       if (x === 4 && y === 4) terrain = "forest";
       if (Math.abs(x - 7) + Math.abs(y - 3) <= 1) terrain = "grass";
+      if (
+        starts
+          .slice(2)
+          .some((p) => Math.abs(p.x - x) + Math.abs(p.y - y) <= 1) ||
+        cities.some((p) => p.x === x && p.y === y)
+      )
+        terrain = "grass";
       tiles.push({ x, y, terrain });
     }
   }
@@ -91,36 +153,33 @@ export function createGame(seed = "fern-104"): GameState {
     height,
     revision: 0,
     activePlayerId: "player-1",
-    players: [
-      { id: "player-1", name: "Sunward" },
-      { id: "player-2", name: "Tideward" },
-    ],
+    players: starts.map((_, i) => ({
+      id: `player-${i + 1}`,
+      name: [
+        "Sunward",
+        "Tideward",
+        "Mossward",
+        "Dawnward",
+        "Emberward",
+        "Violetward",
+        "Roseward",
+        "Stoneward",
+      ][i],
+      stars: i === 0 ? cityEconomy.income[0] : 0,
+    })),
+    cities,
     turnNumber: 1,
     tiles,
-    units: [
-      {
-        id: "warrior-1",
-        ownerId: "player-1",
-        x: 4,
-        y: 5,
-        movement: 2,
-        maxMovement: 2,
-        ...warriorStats,
-        hp: warriorStats.maxHp,
-        hasAttacked: false,
-      },
-      {
-        id: "warrior-2",
-        ownerId: "player-2",
-        x: 7,
-        y: 3,
-        movement: 0,
-        maxMovement: 2,
-        ...warriorStats,
-        hp: warriorStats.maxHp,
-        hasAttacked: false,
-      },
-    ],
+    units: starts.map((position, i) => ({
+      ...position,
+      id: `warrior-${i + 1}`,
+      ownerId: `player-${i + 1}`,
+      movement: i === 0 ? 2 : 0,
+      maxMovement: 2,
+      ...warriorStats,
+      hp: warriorStats.maxHp,
+      hasAttacked: false,
+    })),
   };
 }
 
@@ -245,7 +304,8 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   if (
     action.type !== "move" &&
     action.type !== "ATTACK_UNIT" &&
-    action.type !== "END_TURN"
+    action.type !== "END_TURN" &&
+    action.type !== "UPGRADE_CITY"
   )
     throw new Error("Unknown action");
   const playerIndex = state.players.findIndex(
@@ -260,6 +320,11 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       revision: state.revision + 1,
       turnNumber: state.turnNumber + 1,
       activePlayerId: nextPlayer.id,
+      players: state.players.map((player) =>
+        player.id === nextPlayer.id
+          ? { ...player, stars: player.stars + getIncome(state, player.id) }
+          : player,
+      ),
       units: state.units.map((unit) =>
         unit.ownerId === nextPlayer.id
           ? { ...unit, movement: unit.maxMovement, hasAttacked: false }
@@ -267,6 +332,39 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       ),
     };
   }
+  if (action.type === "UPGRADE_CITY") {
+    const city = state.cities.find((city) => city.id === action.cityId);
+    if (!city || city.ownerId !== action.playerId)
+      throw new Error("Not your city");
+    const cost = getUpgradeCost(city);
+    if (cost === null) throw new Error("City is at maximum level");
+    if (state.players[playerIndex].stars < cost)
+      throw new Error("Not enough stars");
+    return {
+      ...state,
+      revision: state.revision + 1,
+      players: state.players.map((player) =>
+        player.id === action.playerId
+          ? { ...player, stars: player.stars - cost }
+          : player,
+      ),
+      cities: state.cities.map((candidate) =>
+        candidate.id === city.id
+          ? {
+              ...candidate,
+              level: city.level + 1,
+              income: cityEconomy.income[city.level],
+            }
+          : candidate,
+      ),
+    };
+  }
+  const capture = (positions: Position[]) =>
+    state.cities.map((city) =>
+      positions.some((p) => p.x === city.x && p.y === city.y)
+        ? { ...city, ownerId: action.playerId }
+        : city,
+    );
   const unit = state.units.find((candidate) => candidate.id === action.unitId);
   if (!unit) throw new Error("Unknown unit");
   if (
@@ -280,6 +378,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
     return {
       ...state,
       revision: state.revision + 1,
+      cities: capture(result.advance ? [result.advance] : []),
       units: state.units
         .map((candidate) =>
           candidate.id === unit.id
@@ -304,6 +403,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   return {
     ...state,
     revision: state.revision + 1,
+    cities: capture(destination.path),
     units: state.units.map((candidate) =>
       candidate.id === unit.id
         ? {
