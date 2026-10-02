@@ -15,7 +15,7 @@ export default defineConfig({
     launchOptions: { args: ["--enable-unsafe-swiftshader"] },
   },
   webServer: [{
-    command: `npm run dev -- --strictPort --port ${new URL(baseURL).port}`,
+    command: `npm run dev:web -- --strictPort --port ${new URL(baseURL).port}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 60000,

@@ -5,6 +5,11 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
   page,
 }, testInfo) => {
   const errors: string[] = [];
+  const shaderFallbacks: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith(".fx"))
+      shaderFallbacks.push(request.url());
+  });
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text());
@@ -118,6 +123,7 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
     contentType: "image/png",
   });
   expect(errors).toEqual([]);
+  expect(shaderFallbacks).toEqual([]);
 });
 
 test("rejects blocked moves, protects debug snapshots, resets seed and supports camera controls", async ({

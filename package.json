@@ -8,12 +8,13 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w @reach/web -- --host 127.0.0.1",
+    "dev": "node scripts/dev.mjs",
     "preview": "npm run preview -w @reach/web -- --host 127.0.0.1",
     "build": "tsc --noEmit && npm run build -w @reach/web",
     "test": "vitest run --configLoader runner",
     "test:e2e": "playwright test",
-    "dev:server": "npm run dev -w @reach/server"
+    "dev:server": "npm run dev -w @reach/server",
+    "dev:web": "npm run dev -w @reach/web -- --host 127.0.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",

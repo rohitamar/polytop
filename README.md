@@ -39,7 +39,7 @@ Game state holds an ordered player roster, activePlayerId, turnNumber and per-un
 
 ## Multiplayer lobby
 
-Run `npm run dev:server` in a second terminal alongside `npm run dev`. Open **Multiplayer lobby**, enter a player name, then create a room or join using its six-character code. Share the code with another browser client. All members receive live roster updates with distinct server-assigned IDs and colors; the first member is host. A room starts with its host alone while waiting for a second player and accepts up to eight players. The host badge moves to the earliest remaining member when the host leaves. Empty rooms are deleted.
+Run `npm run dev` to start both the web app and lobby server. To run them separately, use `npm run dev:web` and `npm run dev:server` in two terminals. Open **Multiplayer lobby**, enter a player name, then create a room or join using its six-character code. Share the code with another browser client. All members receive live roster updates with distinct server-assigned IDs and colors; the first member is host. A room starts with its host alone while waiting for a second player and accepts up to eight players. The host badge moves to the earliest remaining member when the host leaves. Empty rooms are deleted.
 
 Vite proxies `/lobby` to `ws://127.0.0.1:3001`. The server supports `PORT` and `HOST` environment variables; it binds to loopback by default. For a separately hosted frontend, set `VITE_LOBBY_URL` at build time to the lobby WebSocket URL, or configure a same-origin WebSocket reverse proxy at `/lobby`. Use `wss://` for an HTTPS frontend. `npm run start -w @reach/server` runs the TypeScript server without watch mode.
 
