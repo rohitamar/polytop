@@ -37,7 +37,8 @@ describe("strategic worlds", () => {
         expect(city).toMatchObject({ x: unit.x, y: unit.y, ownerId: unit.ownerId });
         const near = state.tiles.filter(tile => Math.abs(tile.x - city.x) + Math.abs(tile.y - city.y) <= terrainRules.safeRadius);
         expect(near).toHaveLength(13);
-        expect(near.every(tile => Number.isFinite(movementCost[tile.terrain]))).toBe(true);
+        expect(near.every(tile => tile.terrain !== "water")).toBe(true);
+        expect(near.filter(tile => Math.abs(tile.x - city.x) + Math.abs(tile.y - city.y) <= 1).every(tile => Number.isFinite(movementCost[tile.terrain]))).toBe(true);
         expect(getTerritory(state).find(tile => tile.x === city.x && tile.y === city.y)).toMatchObject({ cityId: city.id, playerId: city.ownerId });
         for (const other of state.units.filter(other => other.id !== unit.id)) expect(Math.abs(unit.x - other.x) + Math.abs(unit.y - other.y)).toBeGreaterThanOrEqual(6);
         expect(getReachableTiles({ ...state, activePlayerId: unit.ownerId, units: state.units.map(other => ({ ...other, movement: 2 })) }, unit.id).length).toBeGreaterThanOrEqual(4);
@@ -67,13 +68,20 @@ describe("strategic worlds", () => {
   });
   it("preserves wooded start neighborhoods instead of clearing identical grass diamonds", () => {
     const worlds = Array.from({ length: 12 }, (_, seed) => createGame(String(seed), 8));
-    const neighborhoods = worlds.flatMap(state => state.units.map(unit => state.tiles.filter(tile => Math.abs(tile.x - unit.x) + Math.abs(tile.y - unit.y) <= terrainRules.safeRadius)));
+    const neighborhoods = worlds.flatMap(state => state.units.map(unit => state.tiles.filter(tile => Math.abs(tile.x - unit.x) + Math.abs(tile.y - unit.y) <= 1)));
     expect(neighborhoods.some(tiles => tiles.some(tile => tile.terrain === "forest"))).toBe(true);
     expect(neighborhoods.every(tiles => tiles.every(tile => Number.isFinite(movementCost[tile.terrain])))).toBe(true);
   });
+  it("scatters mountains instead of forming elevation ridges", () => {
+    const state = createGame("fern-104", 8);
+    const mountains = state.tiles.filter(tile => tile.terrain === "mountain");
+    const isolated = mountains.filter(tile => [[0, -1], [1, 0], [0, 1], [-1, 0]].every(([dx, dy]) => getTile(state, tile.x + dx, tile.y + dy)?.terrain !== "mountain"));
+    expect(mountains.length).toBeGreaterThan(20);
+    expect(isolated.length / mountains.length).toBeGreaterThan(0.6);
+  });
   it("forms neighboring terrain regions rather than independent scattered tiles", () => {
     const state = createGame("fern-104", 8);
-    for (const terrain of ["water", "mountain", "forest"] as const) {
+    for (const terrain of ["water", "forest"] as const) {
       const tiles = state.tiles.filter(tile => tile.terrain === terrain);
       expect(tiles.length).toBeGreaterThan(20);
       const clustered = tiles.filter(tile => [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([dx, dy]) => getTile(state, tile.x + dx, tile.y + dy)?.terrain === terrain));

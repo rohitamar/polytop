@@ -89,7 +89,7 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   if (![width, height].every(value => Number.isInteger(value) && value >= 10 && value <= 128)) throw new Error("Map dimensions must be integers from 10 to 128");
   const rules = { ...terrainRules, ...config.terrain };
   if (!Number.isFinite(rules.elevationScale) || rules.elevationScale < 1 ||
-      ![rules.waterMin, rules.waterMax, rules.mountainCoverage, rules.forestCoverage].every(value => Number.isFinite(value) && value >= 0 && value <= 1) || rules.waterMin > rules.waterMax || rules.waterMax + rules.mountainCoverage >= 1 ||
+      ![rules.waterMin, rules.waterMax, rules.mountainCoverage, rules.forestCoverage].every(value => Number.isFinite(value) && value >= 0 && value <= 1) || rules.waterMin > rules.waterMax ||
       !Number.isInteger(rules.safeRadius) || rules.safeRadius < 2 || rules.safeRadius > 4 ||
       !Number.isInteger(rules.neutralCities) || rules.neutralCities < 0 || rules.neutralCities > 16) throw new Error("Invalid terrain configuration");
   if (config.scenario === "demo" && (playerCount !== 2 || width !== 20 || height !== 20)) throw new Error("Demo scenario requires two players on a 20x20 map");
@@ -102,7 +102,11 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   const coverage = rules.waterMin + randomFromSeed(seed + ":water-coverage")() * (rules.waterMax - rules.waterMin);
   const waterTarget = Math.max(Math.ceil(tiles.length * rules.waterMin), Math.min(Math.floor(tiles.length * rules.waterMax), Math.round(tiles.length * coverage)));
   for (const index of ranked.slice(0, waterTarget)) tiles[index].terrain = "water";
-  for (const index of ranked.slice(-Math.round(tiles.length * rules.mountainCoverage))) if (rules.mountainCoverage > 0) tiles[index].terrain = "mountain";
+  const mountains = randomFromSeed(seed + ":mountains");
+  for (const tile of tiles) {
+    const roll = mountains();
+    if (tile.terrain === "grass" && roll < rules.mountainCoverage) tile.terrain = "mountain";
+  }
   growForests(seed + ":forests", tiles, width, height, Math.round(tiles.filter(tile => tile.terrain === "grass").length * rules.forestCoverage), new Set());
   const interior = tiles.filter(tile => tile.x >= rules.safeRadius + 1 && tile.y >= rules.safeRadius + 1 && tile.x < width - rules.safeRadius - 1 && tile.y < height - rules.safeRadius - 1);
   const land = new Set<number>();
@@ -159,7 +163,8 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
     } else {
       const nearStart = starts.some(start => distance(start, tile) <= rules.safeRadius);
       const center = [...starts, ...villages].some(city => distance(city, tile) === 0);
-      if (center || nearStart && (tile.terrain === "water" || tile.terrain === "mountain")) tile.terrain = "grass";
+      const immediateStart = starts.some(start => distance(start, tile) <= 1);
+      if (center || nearStart && tile.terrain === "water" || immediateStart && tile.terrain === "mountain") tile.terrain = "grass";
     }
   }
   const routes = new Set<number>();
@@ -222,21 +227,21 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   return { width, height, starts, villages, tiles };
 }
 
-export const resourceRules = { grassChance: 0.40, fruitShare: 0.50, fishChance: 0.60, metalChance: 0.30, minimumCityOpportunities: 3 } as const;
+export const resourceRules = { grassChance: 0.40, fruitShare: 0.50, fishChance: 0.60, minimumCityOpportunities: 3 } as const;
 export function placeResources(seed: string, tiles: Tile[], width: number, height: number) {
   const random = randomFromSeed(seed + ":resources");
   for (const tile of tiles) {
     delete tile.resource;
-    const roll = random(), kind = random(), deposit = random();
+    const roll = random(), kind = random();
     const near = [[0, -1], [1, 0], [0, 1], [-1, 0]].flatMap(([dx, dy]) => {
       const x = tile.x + dx, y = tile.y + dy;
       return x < 0 || y < 0 || x >= width || y >= height ? [] : [tiles[y * width + x]];
     });
     if (tile.terrain === "forest") tile.resource = "forest";
+    else if (tile.terrain === "mountain") tile.resource = "mine";
     else if (tile.terrain === "water" && near.some(other => other.terrain !== "water") && roll < resourceRules.fishChance) tile.resource = "fishery";
     else if (tile.terrain === "grass" && roll < resourceRules.grassChance) {
-      if (near.some(other => other.terrain === "mountain") && deposit < resourceRules.metalChance) tile.resource = "mine";
-      else tile.resource = kind < resourceRules.fruitShare ? "orchard" : "wheat";
+      tile.resource = kind < resourceRules.fruitShare ? "orchard" : "wheat";
     }
   }
 }

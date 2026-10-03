@@ -5,7 +5,7 @@ import type { StandardMaterial } from "@babylonjs/core/Materials/standardMateria
 import type { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { getTerritory, positionKey, type GameState, type Position } from "@reach/game-core";
 
-export const opportunityNames = { orchard: "Orchard", wheat: "Wheat", fishery: "Fish", forest: "Forest", mine: "Metal deposit" } as const;
+export const opportunityNames = { orchard: "Orchard", wheat: "Wheat", fishery: "Fish", forest: "Forest", mine: "Mountain · Steel" } as const;
 export const developedNames = { orchard: "Orchard", wheat: "Farm", fishery: "Fishery", forest: "Lumber camp", mine: "Mine" } as const;
 type Batch = { positions: number[]; indices: number[] };
 type Palette = Record<"wood" | "leaf" | "fruit" | "crop" | "soil" | "stone" | "dark" | "ivory", StandardMaterial>;
@@ -65,6 +65,7 @@ export function createResourceLayer(scene: Scene, palette: Palette, point: (posi
       const active = worked.has(positionKey(tile));
       if (active) developed++;
       const p = point(tile);
+      if (tile.terrain === "mountain") { p.x += 0.30; p.z -= 0.30; }
       const variation = ((tile.x * 73 + tile.y * 151) % 97) / 97;
       if (!active) {
         p.x += (variation - 0.5) * 0.3;

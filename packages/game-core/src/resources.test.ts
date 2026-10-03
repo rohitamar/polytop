@@ -1,6 +1,6 @@
 import { placeResources } from "./world";
 import { describe, expect, it } from "vitest";
-import { applyAction, createGame, economy, getCityPopulation, getCityProduction, getProduction, getTerritory, getTile, getTileTerritory, getWorkableTiles, positionKey, type GameState, type Position } from "./index";
+import { applyAction, createGame, economy, getCityPopulation, getReachableTiles, getCityProduction, getProduction, getTerritory, getTile, getTileTerritory, getWorkableTiles, positionKey, type GameState, type Position } from "./index";
 
 const end = (state: GameState) => applyAction(state, { type: "END_TURN", playerId: state.activePlayerId });
 const assign = (state: GameState, cityId: string, tile: Position, remove = false) => applyAction(state, { type: remove ? "UNASSIGN_WORKER" : "ASSIGN_WORKER", playerId: state.activePlayerId, cityId, tile });
@@ -13,11 +13,12 @@ describe("resource opportunities", () => {
       expect(state.tiles).not.toEqual(createGame(seed + "-other", count).tiles);
       expect(new Set(state.tiles.map(tile => tile.resource).filter(Boolean))).toEqual(new Set(["orchard", "wheat", "fishery", "forest", "mine"]));
       for (const tile of state.tiles) {
-        if (tile.resource === "orchard" || tile.resource === "wheat" || tile.resource === "mine") expect(tile.terrain).toBe("grass");
+        if (tile.resource === "orchard" || tile.resource === "wheat") expect(tile.terrain).toBe("grass");
         if (tile.resource === "forest") expect(tile.terrain).toBe("forest");
         const near = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => getTile(state, tile.x + dx, tile.y + dy));
         if (tile.resource === "fishery") { expect(tile.terrain).toBe("water"); expect(near.some(tile => tile && tile.terrain !== "water")).toBe(true); }
-        if (tile.resource === "mine") expect(near.some(tile => tile?.terrain === "mountain")).toBe(true);
+        if (tile.resource === "mine") expect(tile.terrain).toBe("mountain");
+        if (tile.terrain === "mountain") expect(tile.resource).toBe("mine");
       }
       for (const city of state.cities) expect(getTile(state, city.x, city.y)?.resource).toBeUndefined();
       for (const city of state.cities.filter(city => city.ownerId)) {
@@ -71,6 +72,22 @@ describe("city-controlled resource development", () => {
     }
     expect(getWorkableTiles(state, "neutral-1")).toEqual([]);
     expect(() => assign(state, "neutral-1", neutral)).toThrow("Not your city");
+  });
+  it("works generated mountains for Steel without making them traversable", () => {
+    let state = createGame("fern-104", 8);
+    const city = state.cities.find(city => city.ownerId && getWorkableTiles(state, city.id).some(tile => tile.terrain === "mountain"))!;
+    expect(city).toBeDefined();
+    state = { ...state, activePlayerId: city.ownerId! };
+    const tile = getWorkableTiles(state, city.id).find(tile => tile.terrain === "mountain")!;
+    expect(getCityProduction(state, city.id).steel).toBe(0);
+    const worked = assign(state, city.id, tile);
+    expect(getCityProduction(worked, city.id).steel).toBe(2);
+    expect(getCityPopulation(worked, worked.cities.find(other => other.id === city.id)!).available).toBe(1);
+    let produced = end(worked);
+    while (produced.activePlayerId !== city.ownerId) produced = end(produced);
+    expect(produced.players.find(player => player.id === city.ownerId)!.resources.steel).toBe(2);
+    expect(assign(worked, city.id, tile, true).cities.find(other => other.id === city.id)!.workedTiles).toEqual([]);
+    expect(getReachableTiles(worked, worked.units.find(unit => unit.ownerId === city.ownerId)!.id)).not.toContainEqual(expect.objectContaining({ x: tile.x, y: tile.y }));
   });
   it("spends and restores exactly one civilian without producing on assignment", () => {
     const state = createGame("fern-104", 8);
