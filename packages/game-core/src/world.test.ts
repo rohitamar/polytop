@@ -55,15 +55,17 @@ describe("strategic worlds", () => {
       }
     }
   });
-  it.each([2, 4, 6, 8])("keeps water and forests within the configured coverage for %i players", count => {
+  it.each([2, 4, 6, 8])("keeps water, forests and mountains at 13.33 percent of the board for %i players", count => {
     for (let seed = 0; seed < 30; seed++) {
       const state = createGame(String(seed), count);
-      const water = state.tiles.filter(tile => tile.terrain === "water").length;
-      const usable = state.tiles.filter(tile => tile.terrain === "grass" || tile.terrain === "forest").length;
-      const forests = state.tiles.filter(tile => tile.terrain === "forest").length;
-      expect(water / state.tiles.length).toBeGreaterThanOrEqual(0.15);
-      expect(water / state.tiles.length).toBeLessThanOrEqual(0.20);
-      expect(forests).toBe(Math.round(usable * 0.15));
+      for (const terrain of ["water", "forest", "mountain"] as const) {
+        expect(state.tiles.filter(tile => tile.terrain === terrain)).toHaveLength(Math.round(state.tiles.length * 0.1333));
+      }
+    }
+  });
+  it("uses the same terrain proportions in the local demo and rectangular worlds", () => {
+    for (const state of [createGame("fern-104", 2, { scenario: "demo" }), createGame("fern-104", 8, { width: 32, height: 18 })]) {
+      for (const terrain of ["water", "forest", "mountain"] as const) expect(state.tiles.filter(tile => tile.terrain === terrain)).toHaveLength(Math.round(state.tiles.length * 0.1333));
     }
   });
   it("preserves wooded start neighborhoods instead of clearing identical grass diamonds", () => {
@@ -77,7 +79,7 @@ describe("strategic worlds", () => {
     const mountains = state.tiles.filter(tile => tile.terrain === "mountain");
     const isolated = mountains.filter(tile => [[0, -1], [1, 0], [0, 1], [-1, 0]].every(([dx, dy]) => getTile(state, tile.x + dx, tile.y + dy)?.terrain !== "mountain"));
     expect(mountains.length).toBeGreaterThan(20);
-    expect(isolated.length / mountains.length).toBeGreaterThan(0.6);
+    expect(isolated.length / mountains.length).toBeGreaterThan(0.45);
   });
   it("forms neighboring terrain regions rather than independent scattered tiles", () => {
     const state = createGame("fern-104", 8);

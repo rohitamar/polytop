@@ -8,10 +8,10 @@ export const mapSizes = [
 ] as const;
 export const terrainRules = {
   elevationScale: 6,
-  waterMin: 0.15,
-  waterMax: 0.20,
-  mountainCoverage: 0.10,
-  forestCoverage: 0.15,
+  waterMin: 0.1333,
+  waterMax: 0.1333,
+  mountainCoverage: 0.1333,
+  forestCoverage: 0.1333,
   safeRadius: 2,
   neutralCities: 4,
 } as const;
@@ -100,14 +100,14 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   const levels = tiles.map(tile => elevation(tile.x, tile.y) * 0.8 + detail(tile.x, tile.y) * 0.2);
   const ranked = tiles.map((_, index) => index).sort((a, b) => levels[a] - levels[b] || a - b);
   const coverage = rules.waterMin + randomFromSeed(seed + ":water-coverage")() * (rules.waterMax - rules.waterMin);
-  const waterTarget = Math.max(Math.ceil(tiles.length * rules.waterMin), Math.min(Math.floor(tiles.length * rules.waterMax), Math.round(tiles.length * coverage)));
+  const waterTarget = rules.waterMin === rules.waterMax ? Math.round(tiles.length * coverage) : Math.max(Math.ceil(tiles.length * rules.waterMin), Math.min(Math.floor(tiles.length * rules.waterMax), Math.round(tiles.length * coverage)));
   for (const index of ranked.slice(0, waterTarget)) tiles[index].terrain = "water";
   const mountains = randomFromSeed(seed + ":mountains");
   for (const tile of tiles) {
     const roll = mountains();
     if (tile.terrain === "grass" && roll < rules.mountainCoverage) tile.terrain = "mountain";
   }
-  growForests(seed + ":forests", tiles, width, height, Math.round(tiles.filter(tile => tile.terrain === "grass").length * rules.forestCoverage), new Set());
+  growForests(seed + ":forests", tiles, width, height, Math.round(tiles.length * rules.forestCoverage), new Set());
   const interior = tiles.filter(tile => tile.x >= rules.safeRadius + 1 && tile.y >= rules.safeRadius + 1 && tile.x < width - rules.safeRadius - 1 && tile.y < height - rules.safeRadius - 1);
   const land = new Set<number>();
   const seen = new Set<number>();
@@ -219,9 +219,20 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   }
   const centers = new Set([...starts, ...villages].map(city => city.y * width + city.x));
   if (config.scenario === "demo") for (const [x, y] of [[4, 3], [7, 4], [7, 5]]) centers.add(y * width + x);
-  const usable = tiles.filter(tile => tile.terrain === "grass" || tile.terrain === "forest");
-  const forestTarget = Math.round(usable.length * rules.forestCoverage);
-  const existingForest = usable.filter(tile => tile.terrain === "forest");
+  const mountainTarget = Math.round(tiles.length * rules.mountainCoverage);
+  const existingMountains = tiles.filter(tile => tile.terrain === "mountain");
+  for (const tile of existingMountains.slice(mountainTarget)) tile.terrain = "grass";
+  let mountainCount = Math.min(existingMountains.length, mountainTarget);
+  const mountainRandom = randomFromSeed(seed + ":mountain-balance");
+  const mountainCandidates = tiles.filter(tile => tile.terrain === "grass" && !routes.has(tile.y * width + tile.x) && !centers.has(tile.y * width + tile.x) && !starts.some(start => distance(start, tile) <= (config.scenario === "demo" ? rules.safeRadius : 1)) && !(config.scenario === "demo" && (reserved.has(tile.y * width + tile.x) || villages.some(city => distance(city, tile) <= 1)))).map(tile => ({ tile, priority: mountainRandom() })).sort((a, b) => a.priority - b.priority || a.tile.y - b.tile.y || a.tile.x - b.tile.x);
+  for (const { tile } of mountainCandidates) {
+    if (mountainCount >= mountainTarget) break;
+    tile.terrain = "mountain";
+    mountainCount++;
+  }
+  if (mountainCount < mountainTarget) throw new Error("Map cannot fit configured mountain coverage while preserving city routes");
+  const forestTarget = Math.round(tiles.length * rules.forestCoverage);
+  const existingForest = tiles.filter(tile => tile.terrain === "forest");
   for (const tile of existingForest.slice(forestTarget)) tile.terrain = "grass";
   growForests(seed + ":forest-balance", tiles, width, height, forestTarget, centers);
   return { width, height, starts, villages, tiles };
