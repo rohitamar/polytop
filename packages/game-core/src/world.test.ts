@@ -12,7 +12,7 @@ describe("strategic worlds", () => {
     expect(() => createGame("test", count)).toThrow("2-8");
   });
   it("reproduces all state from seed and configuration", () => {
-    const config = { width: 32, height: 18, terrain: { forestScale: 5, waterThreshold: 0.3 } };
+    const config = { width: 32, height: 18, terrain: { elevationScale: 5, waterMin: 0.16, waterMax: 0.18 } };
     const state = createGame("world", 6, config);
     expect(createGame("world", 6, config)).toEqual(state);
     expect(createGame("other", 6, config).tiles).not.toEqual(state.tiles);
@@ -25,7 +25,7 @@ describe("strategic worlds", () => {
     const reversed = { ...state, tiles: [...state.tiles].reverse() };
     expect(getTile(reversed, 31, 17)).toEqual(getTile(state, 31, 17));
   });
-  it.each([{ width: 9 }, { height: 129 }, { width: 20.5 }, { terrain: { waterScale: 0 } }, { terrain: { safeRadius: 1 } }])("rejects invalid config %j", config => {
+  it.each([{ width: 9 }, { height: 129 }, { width: 20.5 }, { terrain: { elevationScale: 0 } }, { terrain: { safeRadius: 1 } }])("rejects invalid config %j", config => {
     expect(() => createGame("test", 2, config)).toThrow();
   });
   it.each([2, 4, 6, 8])("protects and connects starts and cities for %i players across seeds", count => {
@@ -52,6 +52,17 @@ describe("strategic worlds", () => {
         expect(getTile(state, city.x, city.y)?.terrain).toBe("grass");
         expect(visited.has(positionKey(city))).toBe(true);
       }
+    }
+  });
+  it.each([2, 4, 6, 8])("keeps water and forests within the configured coverage for %i players", count => {
+    for (let seed = 0; seed < 30; seed++) {
+      const state = createGame(String(seed), count);
+      const water = state.tiles.filter(tile => tile.terrain === "water").length;
+      const usable = state.tiles.filter(tile => tile.terrain === "grass" || tile.terrain === "forest").length;
+      const forests = state.tiles.filter(tile => tile.terrain === "forest").length;
+      expect(water / state.tiles.length).toBeGreaterThanOrEqual(0.15);
+      expect(water / state.tiles.length).toBeLessThanOrEqual(0.20);
+      expect(forests).toBe(Math.round(usable * 0.15));
     }
   });
   it("preserves wooded start neighborhoods instead of clearing identical grass diamonds", () => {

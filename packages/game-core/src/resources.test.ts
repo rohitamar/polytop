@@ -1,3 +1,4 @@
+import { placeResources } from "./world";
 import { describe, expect, it } from "vitest";
 import { applyAction, createGame, economy, getCityPopulation, getCityProduction, getProduction, getTerritory, getTile, getTileTerritory, getWorkableTiles, positionKey, type GameState, type Position } from "./index";
 
@@ -27,12 +28,25 @@ describe("resource opportunities", () => {
       }
     }
   });
-  it("leaves open ground and clusters food opportunities", () => {
+  it("leaves open ground and scatters food opportunities", () => {
     const state = createGame("fern-104", 8);
     const fields = state.tiles.filter(tile => tile.resource === "orchard" || tile.resource === "wheat");
     expect(state.tiles.filter(tile => tile.terrain === "grass" && !tile.resource).length).toBeGreaterThan(30);
     const grouped = fields.filter(tile => [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([dx, dy]) => getTile(state, tile.x + dx, tile.y + dy)?.resource === tile.resource));
-    expect(grouped.length / fields.length).toBeGreaterThan(0.7);
+    expect(grouped.length / fields.length).toBeLessThan(0.7);
+  });
+  it("uses independent 40-percent grass resource rolls with an equal food split", () => {
+    const tiles = Array.from({ length: 10000 }, (_, i) => ({ x: i % 100, y: Math.floor(i / 100), terrain: "grass" as const, resource: undefined as import("./index").Opportunity | undefined }));
+    placeResources("probabilities", tiles, 100, 100);
+    const wheat = tiles.filter(tile => tile.resource === "wheat").length;
+    const fruit = tiles.filter(tile => tile.resource === "orchard").length;
+    expect((wheat + fruit) / tiles.length).toBeGreaterThan(0.38);
+    expect((wheat + fruit) / tiles.length).toBeLessThan(0.42);
+    expect(wheat / (wheat + fruit)).toBeGreaterThan(0.47);
+    expect(wheat / (wheat + fruit)).toBeLessThan(0.53);
+    const copy = structuredClone(tiles);
+    placeResources("probabilities", copy, 100, 100);
+    expect(copy).toEqual(tiles);
   });
   it("supports rectangular resource placement", () => {
     const config = { width: 34, height: 16 };

@@ -7,13 +7,11 @@ export const mapSizes = [
   { maxPlayers: 8, size: 30 },
 ] as const;
 export const terrainRules = {
-  waterScale: 6,
-  mountainScale: 4,
-  forestScale: 3,
-  waterThreshold: 0.35,
-  mountainThreshold: 0.70,
-  forestThreshold: 0.54,
-  coastalBias: 0.18,
+  elevationScale: 6,
+  waterMin: 0.15,
+  waterMax: 0.20,
+  mountainCoverage: 0.10,
+  forestCoverage: 0.15,
   safeRadius: 2,
   neutralCities: 4,
 } as const;
@@ -38,37 +36,74 @@ function randomFromSeed(seed: string) {
 
 function noise(seed: string, width: number, height: number, scale: number) {
   const random = randomFromSeed(seed);
-  const columns = Math.ceil(width / scale) + 1;
-  const rows = Math.ceil(height / scale) + 1;
-  const values = Array.from({ length: columns * rows }, () => random());
-  const smooth = (v: number) => v * v * (3 - 2 * v);
+  const columns = Math.ceil((width + 1) / scale) + 1;
+  const rows = Math.ceil((height + 1) / scale) + 1;
+  const gradients = Array.from({ length: columns * rows }, () => {
+    const angle = random() * Math.PI * 2;
+    return [Math.cos(angle), Math.sin(angle)];
+  });
+  const fade = (v: number) => v * v * v * (v * (v * 6 - 15) + 10);
   return (x: number, y: number) => {
-    const cx = Math.floor(x / scale), cy = Math.floor(y / scale);
-    const fx = smooth(x / scale - cx), fy = smooth(y / scale - cy);
-    const top = values[cy * columns + cx] * (1 - fx) + values[cy * columns + cx + 1] * fx;
-    const bottom = values[(cy + 1) * columns + cx] * (1 - fx) + values[(cy + 1) * columns + cx + 1] * fx;
-    return top * (1 - fy) + bottom * fy;
+    const px = (x + 0.37) / scale, py = (y + 0.71) / scale;
+    const cx = Math.floor(px), cy = Math.floor(py), dx = px - cx, dy = py - cy;
+    const dot = (gx: number, gy: number) => {
+      const gradient = gradients[gy * columns + gx];
+      return gradient[0] * (px - gx) + gradient[1] * (py - gy);
+    };
+    const fx = fade(dx), fy = fade(dy);
+    const top = dot(cx, cy) * (1 - fx) + dot(cx + 1, cy) * fx;
+    const bottom = dot(cx, cy + 1) * (1 - fx) + dot(cx + 1, cy + 1) * fx;
+    return 0.5 + (top * (1 - fy) + bottom * fy) * 0.5;
   };
+}
+function growForests(seed: string, tiles: Tile[], width: number, height: number, target: number, excluded: Set<number>) {
+  const random = randomFromSeed(seed);
+  const eligible = tiles.filter(tile => tile.terrain === "grass" && !excluded.has(tile.y * width + tile.x));
+  for (let i = eligible.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
+  }
+  let count = tiles.filter(tile => tile.terrain === "forest").length;
+  for (const seedTile of eligible) {
+    if (count >= target) break;
+    if (seedTile.terrain !== "grass") continue;
+    const frontier = [seedTile];
+    let remaining = 3 + Math.floor(random() * 5);
+    while (frontier.length && remaining > 0 && count < target) {
+      const [tile] = frontier.splice(Math.floor(random() * frontier.length), 1);
+      const index = tile.y * width + tile.x;
+      if (tile.terrain !== "grass" || excluded.has(index)) continue;
+      tile.terrain = "forest";
+      count++;
+      remaining--;
+      for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        const x = tile.x + dx, y = tile.y + dy;
+        if (x >= 0 && y >= 0 && x < width && y < height) frontier.push(tiles[y * width + x]);
+      }
+    }
+  }
 }
 export function generateWorld(seed: string, playerCount: number, config: WorldConfig) {
   const defaults = getMapSize(playerCount);
   const width = config.width ?? defaults.width, height = config.height ?? defaults.height;
   if (![width, height].every(value => Number.isInteger(value) && value >= 10 && value <= 128)) throw new Error("Map dimensions must be integers from 10 to 128");
   const rules = { ...terrainRules, ...config.terrain };
-  if (![rules.waterScale, rules.mountainScale, rules.forestScale].every(value => Number.isFinite(value) && value >= 1) ||
-      ![rules.waterThreshold, rules.mountainThreshold, rules.forestThreshold, rules.coastalBias].every(value => Number.isFinite(value) && value >= 0 && value <= 1) ||
+  if (!Number.isFinite(rules.elevationScale) || rules.elevationScale < 1 ||
+      ![rules.waterMin, rules.waterMax, rules.mountainCoverage, rules.forestCoverage].every(value => Number.isFinite(value) && value >= 0 && value <= 1) || rules.waterMin > rules.waterMax || rules.waterMax + rules.mountainCoverage >= 1 ||
       !Number.isInteger(rules.safeRadius) || rules.safeRadius < 2 || rules.safeRadius > 4 ||
       !Number.isInteger(rules.neutralCities) || rules.neutralCities < 0 || rules.neutralCities > 16) throw new Error("Invalid terrain configuration");
   if (config.scenario === "demo" && (playerCount !== 2 || width !== 20 || height !== 20)) throw new Error("Demo scenario requires two players on a 20x20 map");
-  const water = noise(seed + ":water", width, height, rules.waterScale);
-  const mountain = noise(seed + ":mountain", width, height, rules.mountainScale);
-  const forest = noise(seed + ":forest", width, height, rules.forestScale);
+  const elevation = noise(seed + ":elevation", width, height, rules.elevationScale);
+  const detail = noise(seed + ":elevation-detail", width, height, Math.max(1, rules.elevationScale / 2));
   const tiles: Tile[] = [];
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const coast = Math.min(x, y, width - 1 - x, height - 1 - y) < 1 ? rules.coastalBias : 0;
-    const terrain: Terrain = water(x, y) - coast < rules.waterThreshold ? "water" : mountain(x, y) > rules.mountainThreshold ? "mountain" : forest(x, y) > rules.forestThreshold ? "forest" : "grass";
-    tiles.push({ x, y, terrain });
-  }
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) tiles.push({ x, y, terrain: "grass" });
+  const levels = tiles.map(tile => elevation(tile.x, tile.y) * 0.8 + detail(tile.x, tile.y) * 0.2);
+  const ranked = tiles.map((_, index) => index).sort((a, b) => levels[a] - levels[b] || a - b);
+  const coverage = rules.waterMin + randomFromSeed(seed + ":water-coverage")() * (rules.waterMax - rules.waterMin);
+  const waterTarget = Math.max(Math.ceil(tiles.length * rules.waterMin), Math.min(Math.floor(tiles.length * rules.waterMax), Math.round(tiles.length * coverage)));
+  for (const index of ranked.slice(0, waterTarget)) tiles[index].terrain = "water";
+  for (const index of ranked.slice(-Math.round(tiles.length * rules.mountainCoverage))) if (rules.mountainCoverage > 0) tiles[index].terrain = "mountain";
+  growForests(seed + ":forests", tiles, width, height, Math.round(tiles.filter(tile => tile.terrain === "grass").length * rules.forestCoverage), new Set());
   const interior = tiles.filter(tile => tile.x >= rules.safeRadius + 1 && tile.y >= rules.safeRadius + 1 && tile.x < width - rules.safeRadius - 1 && tile.y < height - rules.safeRadius - 1);
   const land = new Set<number>();
   const seen = new Set<number>();
@@ -127,6 +162,7 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
       if (center || nearStart && (tile.terrain === "water" || tile.terrain === "mountain")) tile.terrain = "grass";
     }
   }
+  const routes = new Set<number>();
   const connect = (from: Position, to: Position) => {
     const costs = new Float64Array(tiles.length).fill(Infinity);
     const previous = new Int32Array(tiles.length).fill(-1);
@@ -144,14 +180,16 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
         if (x < 0 || y < 0 || x >= width || y >= height) continue;
         const index = y * width + x;
         const terrain = tiles[index].terrain;
-        const cost = costs[current] + (terrain === "water" ? 24 : terrain === "mountain" ? 12 : 1) + forest(x, y) * 0.3;
+        const cost = costs[current] + (terrain === "water" ? 24 : terrain === "mountain" ? 12 : 1) + levels[index] * 0.3;
         if (cost >= costs[index]) continue;
         costs[index] = cost;
         previous[index] = current;
         pending.add(index);
       }
     }
+    routes.add(start);
     for (let index = target; index !== start && index >= 0; index = previous[index]) {
+      routes.add(index);
       if (tiles[index].terrain === "water" || tiles[index].terrain === "mountain") tiles[index].terrain = "grass";
     }
   };
@@ -166,26 +204,39 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
     tiles[4 * width + 7].terrain = "grass";
     tiles[5 * width + 7].terrain = "grass";
   }
+  const reserved = new Set(routes);
+  for (const tile of tiles) if (starts.some(start => distance(start, tile) <= rules.safeRadius) || villages.some(city => distance(city, tile) === 0)) reserved.add(tile.y * width + tile.x);
+  if (config.scenario === "demo") for (const [x, y] of [[4, 3], [4, 4], [7, 4], [7, 5]]) reserved.add(y * width + x);
+  let waters = tiles.filter(tile => tile.terrain === "water").length;
+  for (const index of ranked) {
+    if (waters >= waterTarget) break;
+    if (!reserved.has(index) && tiles[index].terrain !== "water") { tiles[index].terrain = "water"; waters++; }
+  }
+  const centers = new Set([...starts, ...villages].map(city => city.y * width + city.x));
+  if (config.scenario === "demo") for (const [x, y] of [[4, 3], [7, 4], [7, 5]]) centers.add(y * width + x);
+  const usable = tiles.filter(tile => tile.terrain === "grass" || tile.terrain === "forest");
+  const forestTarget = Math.round(usable.length * rules.forestCoverage);
+  const existingForest = usable.filter(tile => tile.terrain === "forest");
+  for (const tile of existingForest.slice(forestTarget)) tile.terrain = "grass";
+  growForests(seed + ":forest-balance", tiles, width, height, forestTarget, centers);
   return { width, height, starts, villages, tiles };
 }
 
-export const resourceRules = { scale: 3, orchardThreshold: 0.26, wheatThreshold: 0.70, fishThreshold: 0.55, metalThreshold: 0.44, minimumCityOpportunities: 3 } as const;
+export const resourceRules = { grassChance: 0.40, fruitShare: 0.50, fishChance: 0.60, metalChance: 0.30, minimumCityOpportunities: 3 } as const;
 export function placeResources(seed: string, tiles: Tile[], width: number, height: number) {
-  const fields = noise(seed + ":fields", width, height, resourceRules.scale);
-  const deposits = noise(seed + ":deposits", width, height, resourceRules.scale);
-  const neighbors = (tile: Tile) => [[0, -1], [1, 0], [0, 1], [-1, 0]].flatMap(([dx, dy]) => {
-    const x = tile.x + dx, y = tile.y + dy;
-    return x < 0 || y < 0 || x >= width || y >= height ? [] : [tiles[y * width + x]];
-  });
+  const random = randomFromSeed(seed + ":resources");
   for (const tile of tiles) {
-    const nearby = neighbors(tile);
-    const value = fields(tile.x, tile.y);
+    delete tile.resource;
+    const roll = random(), kind = random(), deposit = random();
+    const near = [[0, -1], [1, 0], [0, 1], [-1, 0]].flatMap(([dx, dy]) => {
+      const x = tile.x + dx, y = tile.y + dy;
+      return x < 0 || y < 0 || x >= width || y >= height ? [] : [tiles[y * width + x]];
+    });
     if (tile.terrain === "forest") tile.resource = "forest";
-    else if (tile.terrain === "water" && nearby.some(other => other.terrain !== "water") && value > resourceRules.fishThreshold) tile.resource = "fishery";
-    else if (tile.terrain === "grass") {
-      if (nearby.some(other => other.terrain === "mountain") && deposits(tile.x, tile.y) > resourceRules.metalThreshold) tile.resource = "mine";
-      else if (value < resourceRules.orchardThreshold) tile.resource = "orchard";
-      else if (value > resourceRules.wheatThreshold) tile.resource = "wheat";
+    else if (tile.terrain === "water" && near.some(other => other.terrain !== "water") && roll < resourceRules.fishChance) tile.resource = "fishery";
+    else if (tile.terrain === "grass" && roll < resourceRules.grassChance) {
+      if (near.some(other => other.terrain === "mountain") && deposit < resourceRules.metalChance) tile.resource = "mine";
+      else tile.resource = kind < resourceRules.fruitShare ? "orchard" : "wheat";
     }
   }
 }
