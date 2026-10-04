@@ -1,4 +1,4 @@
-import { getTileTerritory, getTechnologyCost, economy, getPlayerPopulation, getProduction, canUnitEnterTerrain, getTile, movementCost, positionKey, getTerritory, applyAction, getReachableTiles, getAttackTargets, type GameState } from "@reach/game-core";
+import { createGame, getPlayerView, getTileVisibility, TileVisibility, getPlayerAction, updatePlayerExploration, type GameAction, getTechnologyCost, economy, getPlayerPopulation, getProduction, canUnitEnterTerrain, getTile, movementCost, positionKey, getTerritory, applyAction, getReachableTiles, getAttackTargets, type GameState } from "@reach/game-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
@@ -10,7 +10,9 @@ import { createLobbyServer } from "./server";
 describe("lobby WebSocket server", () => {
   let server: ReturnType<typeof createLobbyServer>;
   let port: number;
+  let demo = true;
   beforeEach(async () => {
+    demo = true;
     server = createLobbyServer({ seed: "fern-104", demo: true });
     port = await server.listen(0);
   });
@@ -71,42 +73,69 @@ describe("lobby WebSocket server", () => {
     }
     clients[0].send({ type: "START_MATCH" });
     let state!: GameState;
-    for (const client of clients) {
-      const response = await client.next();
+    for (let i = 0; i < clients.length; i++) {
+      const response = await clients[i].next();
       if (response.type !== "MATCH_STATE") throw new Error("Expected match");
-      if (state) expect(response.state).toEqual(state);
-      state = response.state;
+      if (!state) {
+        const initial = createGame("fern-104", count, demo && count === 2 ? { scenario: "demo" } : {});
+        const ids = new Map(initial.players.map((player, index) => [player.id, response.state.players[index].id]));
+        state = updatePlayerExploration({ ...initial, exploration: undefined, activePlayerId: response.state.activePlayerId,
+          players: initial.players.map((player, index) => ({ ...player, id: response.state.players[index].id, name: response.state.players[index].name })),
+          units: initial.units.map(unit => ({ ...unit, ownerId: ids.get(unit.ownerId)! })),
+          cities: initial.cities.map(city => ({ ...city, ownerId: city.ownerId ? ids.get(city.ownerId)! : null })) });
+      }
+      expect(response.state).toEqual(getPlayerView(state, state.players[i].id));
     }
     return { clients, state, code: created.room.code };
   }
 
   async function act(clients: Awaited<ReturnType<typeof connect>>[], state: GameState, action: unknown, index = state.players.findIndex(player => player.id === state.activePlayerId)) {
     clients[index].send({ type: "GAME_ACTION", requestId: `test-${state.revision}`, expectedRevision: state.revision, action });
-    let next!: GameState;
-    for (const client of [clients[index], ...clients.filter((_, i) => i !== index)]) {
-      const response = await client.next();
-      if (response.type !== "MATCH_STATE") throw new Error(JSON.stringify(response));
-      if (next) { expect(response.state).toEqual(next); expect(getTerritory(response.state)).toEqual(getTerritory(next)); }
-      next = response.state;
+    const accepted = { ...action as GameAction, playerId: state.players[index].id };
+    const path = accepted.type === "move" ? getReachableTiles(state, accepted.unitId).find(tile => positionKey(tile) === positionKey(accepted.to))?.path : undefined;
+    const next = applyAction(state, accepted);
+    for (let i = 0; i < clients.length; i++) {
+      const response = await clients[i].next();
+      expect(response).toEqual({ type: "MATCH_STATE", state: getPlayerView(next, next.players[i].id), action: getPlayerAction(next.players[i].id, accepted), ...(i === index && path ? { path } : {}) });
     }
     expect(next.revision).toBe(state.revision + 1);
     return next;
   }
 
 
-  it("chooses independent seeds per room and broadcasts one world to every client", async () => {
-    await server.close();
-    server = createLobbyServer();
-    port = await server.listen(0);
+  it("withholds the map seed, hidden enemies and other players' exploration", async () => {
     const first = await match(8);
     const second = await match(2);
-    expect(first.state.seed).not.toBe(second.state.seed);
-    expect(first.state.tiles).not.toEqual(second.state.tiles);
+    const view = getPlayerView(first.state, first.state.players[0].id);
+    expect(view.seed).toBe("");
+    expect(view.tiles.length).toBeLessThan(first.state.tiles.length);
+    expect(view.units).toHaveLength(1);
+    expect(Object.keys(view.exploration!)).toEqual([first.state.players[0].id]);
     expect(first.state.width).toBe(30);
     expect(second.state.width).toBe(20);
-    const next = await act(first.clients, first.state, { type: "END_TURN" });
-    expect(getTerritory(next)).toEqual(getTerritory(first.state));
     expect((await act(second.clients, second.state, { type: "END_TURN" })).revision).toBe(1);
+  });
+
+  it("resumes explored fog memory and gives no hidden-unit existence oracle", async () => {
+    const { clients, state: initial, code } = await match();
+    let state = initial;
+    for (const to of [{ x: 4, y: 4 }, { x: 4, y: 3 }, { x: 4, y: 4 }]) {
+      state = await act(clients, state, { type: "move", unitId: "warrior-1", to });
+      state = await act(clients, state, { type: "END_TURN" });
+      state = await act(clients, state, { type: "END_TURN" });
+    }
+    expect(getTileVisibility(state, state.players[0].id, "4,2")).toBe(TileVisibility.Explored);
+    for (const unitId of ["warrior-2", "unknown-unit"]) {
+      clients[0].send({ type: "GAME_ACTION", requestId: unitId, expectedRevision: state.revision, action: { type: "move", unitId, to: { x: 7, y: 4 } } });
+      expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Not your unit or turn" });
+    }
+    const token = clients[0].session().token;
+    await clients[0].close();
+    const resumed = await connect();
+    resumed.send({ type: "RESUME_MATCH", code, token });
+    await clients[1].next();
+    await resumed.next();
+    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state: getPlayerView(state, state.players[0].id), action: null });
   });
 
   it("synchronizes automatic Gold and population for eight clients", async () => {
@@ -130,10 +159,11 @@ describe("lobby WebSocket server", () => {
     clients[0].send(request);
     const response = await clients[0].next();
     if (response.type !== "MATCH_STATE") throw new Error("Expected turn");
-    expect(await clients[1].next()).toEqual(response);
+    const enemyResponse = await clients[1].next();
+    expect(enemyResponse).toMatchObject({ type: "MATCH_STATE", state: { perspectiveId: state.players[1].id, revision: response.state.revision } });
     expect((await clients[0].next()).type).toBe("ACTION_REJECTED");
-    state = response.state;
-    expect(state).toEqual(applyAction(original, { type: "END_TURN", playerId: original.activePlayerId }));
+    state = applyAction(original, { type: "END_TURN", playerId: original.activePlayerId });
+    expect(response.state).toEqual(getPlayerView(state, state.players[0].id));
     clients[1].send({ ...request, requestId: "stale-turn" });
     expect((await clients[1].next()).type).toBe("ACTION_REJECTED");
     state = await act(clients, state, { type: "END_TURN" });
@@ -193,8 +223,9 @@ describe("lobby WebSocket server", () => {
     expect((await guest.next()).type).toBe("LOBBY_ERROR");
   });
 
-  it.each([2, 4, 6, 8])("starts identical canonical state for %i players", async count => {
+  it.each([2, 4, 6, 8])("starts canonical state with independent player views for %i players", async count => {
     await server.close();
+    demo = false;
     server = createLobbyServer({ seed: "fern-104" });
     port = await server.listen(0);
     const { state, clients } = await match(count);
@@ -293,9 +324,10 @@ describe("lobby WebSocket server", () => {
     clients[0].send({ type: "GAME_ACTION", requestId: "race", expectedRevision: state.revision, action });
     const response = await clients[0].next();
     if (response.type !== "MATCH_STATE") throw new Error("Expected recruitment");
-    state = response.state;
-    expect(state).toEqual(applyAction(before, { ...action, unitType: "warrior", playerId: before.activePlayerId }));
-    expect(await clients[1].next()).toEqual(response);
+    state = applyAction(before, { ...action, unitType: "warrior", playerId: before.activePlayerId });
+    expect(response.state).toEqual(getPlayerView(state, state.players[0].id));
+    const enemyResponse = await clients[1].next();
+    expect(enemyResponse).toMatchObject({ type: "MATCH_STATE", state: { perspectiveId: state.players[1].id, revision: response.state.revision } });
     expect((await clients[0].next()).type).toBe("ACTION_REJECTED");
     const id = state.units.at(-1)!.id;
     expect(state.units.at(-1)).toMatchObject({ movement: 0, hasAttacked: true });
@@ -349,15 +381,17 @@ describe("lobby WebSocket server", () => {
     clients[0].send(request);
     const response = await clients[0].next();
     if (response.type !== "MATCH_STATE") throw new Error("Expected collection");
-    expect(await clients[1].next()).toEqual(response);
+    const enemyResponse = await clients[1].next();
+    expect(enemyResponse).toMatchObject({ type: "MATCH_STATE", state: { perspectiveId: state.players[1].id, revision: response.state.revision } });
     expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
     expect(response.state.players[0].resources.gold).toBe(before.players[0].resources.gold + 2);
-    expect(response.state.players[1]).toEqual(before.players[1]);
+    expect(response.state.players[1].resources).toEqual({ gold: 0 });
     expect(response.state.tiles.find(tile => tile.x === 4 && tile.y === 3)!.resource).toBeUndefined();
     clients[0].send({ ...request, requestId: "stale-collection" });
     expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "State changed. Try again." });
-    state = await act(clients, response.state, { type: "END_TURN" });
-    expect(state).toEqual(applyAction(response.state, { type: "END_TURN", playerId: response.state.activePlayerId }));
+    state = applyAction(before, { type: "move", playerId: before.activePlayerId, unitId: "warrior-1", to: { x: 4, y: 3 } });
+    expect(response.state).toEqual(getPlayerView(state, state.players[0].id));
+    state = await act(clients, state, { type: "END_TURN" });
   });
 
   it("resumes stored technologies, depleted resources and Gold without repaying income or allowing request replay", async () => {
@@ -378,7 +412,7 @@ describe("lobby WebSocket server", () => {
     resumed.send({ type: "RESUME_MATCH", code, token: session.token });
     expect((await clients[1].next()).type).toBe("LOBBY_UPDATE");
     expect(await resumed.next()).toMatchObject({ type: "LOBBY_UPDATE", playerId: state.players[0].id });
-    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state: saved, action: null });
+    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state: getPlayerView(saved, saved.players[0].id), action: null });
     resumed.send({ type: "GAME_ACTION", requestId: "test-3", expectedRevision: saved.revision, action: { type: "move", unitId: "warrior-1", to: { x: 4, y: 3 } } });
     expect(await resumed.next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
     clients[0] = resumed;
@@ -475,9 +509,11 @@ describe("lobby WebSocket server", () => {
       clients[0].send(request);
       const response = await clients[0].next();
       if (response.type !== "MATCH_STATE") throw new Error("Expected Fish collection");
-      expect(await clients[1].next()).toEqual(response);
+      const enemyResponse = await clients[1].next();
+    expect(enemyResponse).toMatchObject({ type: "MATCH_STATE", state: { perspectiveId: state.players[1].id, revision: response.state.revision } });
       expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
-      state = response.state;
+      state = applyAction(state, { type: "move", playerId: state.activePlayerId, unitId: sailor.id, to: { x: fish.x, y: fish.y } });
+      expect(response.state).toEqual(getPlayerView(state, state.players[0].id));
       expect(state.players[0].resources.gold).toBe(gold + 2);
       expect(getTile(state, fish.x, fish.y)?.resource).toBeUndefined();
       break;
@@ -489,7 +525,7 @@ describe("lobby WebSocket server", () => {
     resumed.send({ type: "RESUME_MATCH", code, token });
     expect((await clients[1].next()).type).toBe("LOBBY_UPDATE");
     expect((await resumed.next()).type).toBe("LOBBY_UPDATE");
-    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state, action: null });
+    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state: getPlayerView(state, state.players[0].id), action: null });
   });
 
   it("replaces a live session without changing state or permitting two controlling sockets", async () => {
@@ -499,12 +535,12 @@ describe("lobby WebSocket server", () => {
     expect((await clients[0].next()).type).toBe("MATCH_ENDED");
     expect((await clients[1].next()).type).toBe("LOBBY_UPDATE");
     expect((await replacement.next()).type).toBe("LOBBY_UPDATE");
-    expect(await replacement.next()).toEqual({ type: "MATCH_STATE", state, action: null });
+    expect(await replacement.next()).toEqual({ type: "MATCH_STATE", state: getPlayerView(state, state.players[0].id), action: null });
     clients[0] = replacement;
     expect(await act(clients, state, { type: "END_TURN" })).toEqual(applyAction(state, { type: "END_TURN", playerId: state.activePlayerId }));
   });
 
-  it("recalculates empire prices and broadcasts friendly and neutral roads once, including reconnect", async () => {
+  it("recalculates empire prices and broadcasts visible roads once, including reconnect", async () => {
     const { clients, state: initial, code } = await match();
     let state = await act(clients, initial, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
     expect(getTechnologyCost(state, state.players[0].id, "roads")).toBe(8);
@@ -519,17 +555,19 @@ describe("lobby WebSocket server", () => {
     expect(state.players[0].resources.gold).toBe(gold - 8);
     state = await act(clients, state, { type: "BUILD_ROAD", to: { x: 4, y: 4 } });
     expect(state.players[0].resources.gold).toBe(gold - 11);
-    const neutral = state.tiles.find(tile => tile.terrain === "grass" && !getTileTerritory(state, tile.x, tile.y)?.playerId && !state.cities.some(city => positionKey(city) === positionKey(tile)))!;
+    const neutral = getPlayerView(state, state.players[0].id).tiles.find(tile => tile.terrain === "grass" && !tile.road && !state.cities.some(city => positionKey(city) === positionKey(tile)))!;
     const request = { type: "GAME_ACTION", requestId: "road-once", expectedRevision: state.revision, action: { type: "BUILD_ROAD", to: { x: neutral.x, y: neutral.y } } };
     clients[0].send(request);
     clients[0].send(request);
     clients[0].send({ ...request, requestId: "road-race" });
     const response = await clients[0].next();
     if (response.type !== "MATCH_STATE") throw new Error("Expected road");
-    expect(await clients[1].next()).toEqual(response);
+    const enemyResponse = await clients[1].next();
+    expect(enemyResponse).toMatchObject({ type: "MATCH_STATE", state: { perspectiveId: state.players[1].id, revision: response.state.revision } });
     expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
     expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "State changed. Try again." });
-    state = response.state;
+    state = applyAction(state, { type: "BUILD_ROAD", playerId: state.activePlayerId, to: { x: neutral.x, y: neutral.y } });
+    expect(response.state).toEqual(getPlayerView(state, state.players[0].id));
     expect(state.players[0].resources.gold).toBe(gold - 14);
     expect(getTile(state, neutral.x, neutral.y)?.road).toBe(true);
     clients[0].send({ ...request, requestId: "road-existing", expectedRevision: state.revision });
@@ -540,7 +578,7 @@ describe("lobby WebSocket server", () => {
     resumed.send({ type: "RESUME_MATCH", code, token });
     expect((await clients[1].next()).type).toBe("LOBBY_UPDATE");
     expect((await resumed.next()).type).toBe("LOBBY_UPDATE");
-    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state, action: null });
+    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state: getPlayerView(state, state.players[0].id), action: null });
     clients[0] = resumed;
     const next = await act(clients, state, { type: "END_TURN" });
     expect(next).toEqual(applyAction(state, { type: "END_TURN", playerId: state.activePlayerId }));

@@ -1,4 +1,4 @@
-import type { GameAction, GameState } from "@reach/game-core";
+import type { GameAction, PlayerView, Position } from "@reach/game-core";
 export const ROOM_CAPACITY = 8;
 export const PLAYER_COLORS = [
   "#c58036",
@@ -38,7 +38,7 @@ export type LobbyServerMessage =
   | { type: "MATCH_SESSION"; code: string; token: string }
   | { type: "LOBBY_UPDATE"; playerId: string; room: LobbyRoom }
   | { type: "LEFT_ROOM" }
-  | { type: "MATCH_STATE"; state: GameState; action: GameAction | null }
+  | { type: "MATCH_STATE"; state: PlayerView; action: GameAction | null; path?: Position[] }
   | { type: "ACTION_REJECTED"; requestId: string; message: string }
   | { type: "MATCH_ENDED"; message: string }
   | {
@@ -104,7 +104,7 @@ export function parseLobbyServerMessage(
   if (!record(value)) return null;
   if (value.type === "MATCH_SESSION" && exact(value, ["type", "code", "token"]) && typeof value.code === "string" && ROOM_CODE_PATTERN.test(value.code) && typeof value.token === "string" && /^[a-f0-9-]{36}$/.test(value.token)) return value as LobbyServerMessage;
   if (value.type === "LEFT_ROOM" && exact(value, ["type"])) return { type: "LEFT_ROOM" };
-  if (value.type === "MATCH_STATE" && record(value.state) && Number.isSafeInteger(value.state.revision) && Array.isArray(value.state.players) && Array.isArray(value.state.units) && Array.isArray(value.state.tiles) && Array.isArray(value.state.cities)) return value as LobbyServerMessage;
+  if (value.type === "MATCH_STATE" && record(value.state) && typeof value.state.perspectiveId === "string" && record(value.state.exploration) && Object.keys(value.state.exploration).length === 1 && value.state.perspectiveId in value.state.exploration && Number.isSafeInteger(value.state.revision) && Array.isArray(value.state.players) && Array.isArray(value.state.units) && Array.isArray(value.state.tiles) && Array.isArray(value.state.cities)) return value as LobbyServerMessage;
   if ((value.type === "ACTION_REJECTED" && typeof value.requestId === "string" || value.type === "MATCH_ENDED") && typeof value.message === "string") return value as LobbyServerMessage;
   if (
     value.type === "LOBBY_ERROR" &&

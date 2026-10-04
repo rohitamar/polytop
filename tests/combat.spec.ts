@@ -166,6 +166,6 @@ test("two players preview, attack, retaliate and finish a duel through pointer c
     await page.evaluate(() =>
       window.__GAME_DEBUG__!.getUnits().map((unit) => unit.hp),
     ),
-  ).toEqual([10, 10]);
+  ).toEqual([10]);
   expect(errors).toEqual([]);
 });

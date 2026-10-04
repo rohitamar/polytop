@@ -33,7 +33,7 @@ test("recruits through synchronized city controls and activates on the next owne
     const settle = async (revision: number) => {
       for (const client of [page, guest]) await expect.poll(async () => (await snapshot(client)).revision).toBe(revision);
       await expect((await snapshot(page)).activePlayerId === (await snapshot(page)).players[0].id ? page.getByRole("button", { name: "End Turn", exact: true }) : guest.getByRole("button", { name: "End Turn", exact: true })).toBeEnabled();
-      expect(await snapshot(guest)).toEqual(await snapshot(page));
+      expect((await snapshot(guest)).revision).toBe((await snapshot(page)).revision);
     };
     await unit(page, "warrior-1");
     await tile(page, 5, 5);
@@ -67,7 +67,8 @@ test("recruits through synchronized city controls and activates on the next owne
     expect(recruit).toMatchObject({ unitType: "archer", x: 4, y: 5, movement: 0, hasAttacked: true, homeCityId: "city-1" });
     expect(state.players[0].resources.gold).toBeGreaterThanOrEqual(0);
     await expect(page.getByTestId("available-population")).toHaveText("4");
-    for (const client of [page, guest]) expect(await client.evaluate(id => window.__GAME_DEBUG__!.getVisualPosition(id), recruit.id)).toMatchObject({ x: 4, y: 5 });
+    expect(await page.evaluate(id => window.__GAME_DEBUG__!.getVisualPosition(id), recruit.id)).toMatchObject({ x: 4, y: 5 });
+    expect((await snapshot(guest)).units.some(unit => unit.id === recruit.id)).toBe(false);
     await unit(page, recruit.id);
     expect(await page.evaluate(id => window.__GAME_DEBUG__!.getReachableTiles(id), recruit.id)).toEqual([]);
     expect((await snapshot(page)).units.at(-1)?.unitType).toBe("archer");

@@ -3,6 +3,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   applyAction,
+  getPlayerView,
+  isTileVisible,
   economy,
   resourceDefinitions,
   getRoadBuildingReason,
@@ -69,7 +71,11 @@ function Icon({
 
 function collectionNotice(previous: GameState, next: GameState) {
   const remaining = new Set(next.tiles.filter(tile => tile.resource).map(positionKey));
-  const reward = previous.tiles.reduce((total, tile) => total + (tile.resource && !remaining.has(positionKey(tile)) ? resourceDefinitions[tile.resource].goldReward : 0), 0);
+  const player = next.players.find(player => player.id === next.perspectiveId)!;
+  const before = previous.players.find(candidate => candidate.id === player.id)!;
+  const reward = player.technologies.length > before.technologies.length
+    ? previous.tiles.reduce((total, tile) => total + (tile.resource && !remaining.has(positionKey(tile)) && previous.units.some(unit => unit.ownerId === player.id && positionKey(unit) === positionKey(tile)) ? resourceDefinitions[tile.resource].goldReward : 0), 0)
+    : Math.max(0, player.resources.gold - before.resources.gold);
   return reward ? `+${reward} Gold - Resource collected` : "";
 }
 
@@ -78,7 +84,14 @@ function App() {
   if (import.meta.env.DEV) renders.current++;
   const canvas = useRef<HTMLCanvasElement>(null);
   const world = useRef<World | null>(null);
-  const [state, setState] = useState<GameState>(() => createGame("fern-104", 2, { scenario: "demo" }));
+  const authority = useRef<GameState | null>(null);
+  if (!authority.current) authority.current = createGame("fern-104", 2, { scenario: "demo" });
+  const [state, setState] = useState<GameState>(() => getPlayerView(authority.current!, authority.current!.activePlayerId));
+  const localAction = (action: GameAction) => {
+    const next = applyAction(authority.current!, action);
+    authority.current = next;
+    return getPlayerView(next, next.activePlayerId);
+  };
   const stateRef = useRef(state);
   const network = useRef<{ playerId: string; send: (message: LobbyClientMessage) => Promise<void> } | null>(null);
   const networkMatch = useRef(false);
@@ -122,19 +135,17 @@ function App() {
         setSelected(null);
         setCitySelection(null);
       }
-      if (!message.action) world.current?.rebuild(next);
-      world.current?.update(next, selection.current);
+      if (previous.perspectiveId !== next.perspectiveId || previous.width !== next.width || previous.height !== next.height) world.current?.rebuild(next);
       if (message.action?.type === "move") {
         const action = message.action;
-        const destination = getReachableTiles(previous, action.unitId).find(tile => tile.x === action.to.x && tile.y === action.to.y);
-        if (destination) await world.current?.move(action.unitId, destination.path);
+        if (message.path) await world.current?.move(action.unitId, message.path);
       } else if (message.action?.type === "ATTACK_UNIT") {
         await world.current?.combat(previous, next, previewCombat(previous, message.action.unitId, message.action.targetId));
       }
       world.current?.update(next, selection.current);
       busy.current = false;
       setMoving(false);
-      const collected = collectionNotice(previous, next);
+      const collected = message.action?.playerId === next.perspectiveId ? collectionNotice(previous, next) : "";
       setNotice(collected || (message.action?.type === "UNLOCK_TECHNOLOGY"
         ? `${next.players.find(player => player.id === message.action!.playerId)!.name} unlocked ${getTechnology(message.action.technologyId)!.name}.`
         : message.action?.type === "BUILD_PORT" ? `Port built for ${portRules.goldCost} Gold.` : message.action?.type === "BUILD_ROAD" ? `Road built for ${roadRules.goldCost} Gold.`
@@ -164,7 +175,7 @@ function App() {
   const [roadTile, setRoadTile] = useState<Position | null>(null);
   const stopRoadPlacement = () => { roadMode.current = false; setPlacingRoad(false); setRoadTile(null); portMode.current = false; setPlacingPort(false); setPortTile(null); };
   useEffect(() => { world.current?.selectCity(selectedCityId); world.current?.selectResource(resourceTile); }, [selectedCityId, resourceTile, state]);
-  const city = state.cities.find((city) => city.id === selectedCityId);
+  const city = state.cities.find((city) => city.id === selectedCityId && isTileVisible(state, state.perspectiveId!, city));
   const [selected, setSelected] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const targetRef = useRef<string | null>(null);
@@ -182,7 +193,7 @@ function App() {
   );
   const activePlayer = state.players[activePlayerIndex];
   const activeUnits = state.units.filter(
-    (unit) => unit.ownerId === state.activePlayerId,
+    (unit) => unit.ownerId === state.perspectiveId,
   );
   const unit =
     state.units.find((unit) => unit.id === selected) ?? activeUnits[0];
@@ -222,9 +233,10 @@ function App() {
     setSelected(value);
     world.current?.update(stateRef.current, value);
   };
-  const reset = (seed = stateRef.current.seed) => {
+  const reset = (seed = authority.current!.seed) => {
     if (busy.current || networkMatch.current) return;
-    stateRef.current = createGame(seed, 2, { scenario: "demo" });
+    authority.current = createGame(seed, 2, { scenario: "demo" });
+    stateRef.current = getPlayerView(authority.current, authority.current.activePlayerId);
     setState(stateRef.current);
     select(null);
     world.current?.rebuild(stateRef.current);
@@ -234,7 +246,7 @@ function App() {
   const endTurn = () => {
     if (busy.current) return;
     if (submit({ type: "END_TURN", playerId: stateRef.current.activePlayerId })) return;
-    const next = applyAction(stateRef.current, {
+    const next = localAction({
       type: "END_TURN",
       playerId: stateRef.current.activePlayerId,
     });
@@ -251,7 +263,7 @@ function App() {
     if (busy.current) return;
     if (submit(action)) return;
     try {
-      const next = applyAction(stateRef.current, action);
+      const next = localAction(action);
       stateRef.current = next;
       setState(next);
       world.current?.update(next, selection.current);
@@ -268,7 +280,7 @@ function App() {
     if (submit(action)) return;
     try {
       const previous = stateRef.current;
-      const next = applyAction(previous, action);
+      const next = localAction(action);
       stateRef.current = next;
       setState(next);
       world.current?.update(next, selection.current);
@@ -283,7 +295,7 @@ function App() {
     const current = stateRef.current;
     const result = previewCombat(current, selection.current, targetRef.current);
     if (submit({ type: "ATTACK_UNIT", playerId: current.activePlayerId, unitId: result.attackerId, targetId: result.defenderId })) return;
-    const next = applyAction(current, {
+    const next = localAction({
       type: "ATTACK_UNIT",
       playerId: current.activePlayerId,
       unitId: result.attackerId,
@@ -294,7 +306,6 @@ function App() {
     clearTarget();
     stateRef.current = next;
     setState(next);
-    world.current!.update(next, null);
     setNotice("Blades meet…");
     await world.current!.combat(current, next, result);
     if (!world.current) return;
@@ -305,11 +316,9 @@ function App() {
         ? result.attackerId
         : null,
     );
-    const survivingOwners = new Set(next.units.map((unit) => unit.ownerId));
+
     setNotice(
-      collectionNotice(current, next) || (survivingOwners.size === 1
-        ? "Opposing army defeated. Cities can recruit reinforcements."
-        : "Attack complete. This unit is done for the turn."),
+      collectionNotice(current, next) || "Attack complete. This unit is done for the turn.",
     );
   };
 
@@ -318,12 +327,14 @@ function App() {
     const click = async (position: Position) => {
       if (busy.current) return;
       const current = stateRef.current;
+      const visible = isTileVisible(current, current.perspectiveId!, position);
       if (portMode.current) { setPortTile({ x: position.x, y: position.y }); return; }
       if (roadMode.current) {
         setRoadTile({ x: position.x, y: position.y });
         setNotice(`Review the tile, then build a road for ${roadRules.goldCost} Gold.`);
         return;
       }
+      if (!visible && !selection.current) { setNotice("Explore this tile to discover it."); return; }
       const resource = getTile(current, position.x, position.y);
       if (!selection.current && resource?.resource && !current.units.some(unit => positionKey(unit) === positionKey(position)) && !current.cities.some(city => positionKey(city) === positionKey(position))) {
         if (!citySelection.current) setCitySelection(getTileTerritory(current, position.x, position.y)?.cityId ?? null);
@@ -332,9 +343,9 @@ function App() {
         return;
       }
       if (networkMatch.current && (!connectionReady.current || network.current?.playerId !== current.activePlayerId)) { setNotice("Wait for your turn."); return; }
-      const clickedCity = current.cities.find(
+      const clickedCity = visible ? current.cities.find(
         (city) => city.x === position.x && city.y === position.y,
-      );
+      ) : undefined;
       const clickedUnit = current.units.find(
         (unit) => unit.x === position.x && unit.y === position.y,
       );
@@ -389,19 +400,20 @@ function App() {
         return;
       }
       if (submit({ type: "move", playerId: current.activePlayerId, unitId: warrior.id, to: position })) return;
-      const next = applyAction(current, {
+      const acceptedPath = getReachableTiles(authority.current!, warrior.id).find(tile => tile.x === position.x && tile.y === position.y)?.path;
+      let next: GameState;
+      try { next = localAction({
         type: "move",
         playerId: current.activePlayerId,
         unitId: warrior.id,
         to: position,
-      });
+      }); } catch { setNotice("That route is blocked. Choose another destination."); return; }
       busy.current = true;
       setMoving(true);
       stateRef.current = next;
       setState(next);
-      world.current!.update(next, null);
       setNotice("On the move…");
-      await world.current!.move(warrior.id, destination.path);
+      await world.current!.move(warrior.id, acceptedPath!);
       if (!alive) return;
       busy.current = false;
       setMoving(false);
@@ -450,7 +462,8 @@ function App() {
           getTile: (x, y) => structuredClone(getTile(stateRef.current, x, y)),
           setWorld: (seed, playerCount, dimensions) => {
             if (busy.current || networkMatch.current) throw new Error("Cannot replace an active match");
-            stateRef.current = createGame(seed, playerCount, dimensions);
+            authority.current = createGame(seed, playerCount, dimensions);
+            stateRef.current = getPlayerView(authority.current, authority.current.activePlayerId);
             setState(stateRef.current);
             select(null);
             world.current?.rebuild(stateRef.current);
@@ -495,7 +508,7 @@ function App() {
 
   const treasuryPlayer = state.players.find(player => player.id === network.current?.playerId) ?? activePlayer;
   const production = getProduction(state, treasuryPlayer.id);
-  const population = city?.ownerId ? getPlayerPopulation(state, city.ownerId) : null;
+  const population = city && city.ownerId === state.perspectiveId ? getPlayerPopulation(state, city.ownerId) : null;
   const playerPopulation = getPlayerPopulation(state, treasuryPlayer.id);
   const cityProduction = city ? getCityProduction(state, city.id) : null;
   const cityName = (cityId: string | null | undefined) => {
@@ -602,8 +615,8 @@ function App() {
           <h2>{cityName(city.id)}</h2>
           <div className="city-stats">
             <div><span>Town Center</span><b data-testid="town-hall">{city.townHallLevel} / {economy.maxLevel}</b></div>
-            <div><span>Owner population</span><b data-testid="population">{population?.used ?? 0} / {population?.capacity ?? 0}</b></div>
-            <div><span>Available population</span><b data-testid="available-population">{population?.available ?? 0}</b></div>
+            <div><span>Owner population</span><b data-testid="population">{population ? `${population.used} / ${population.capacity}` : "Unknown"}</b></div>
+            <div><span>Available population</span><b data-testid="available-population">{population?.available ?? "Unknown"}</b></div>
           </div>
           <div className="city-income" aria-label="City production">
             <span>+{cityProduction.gold} Gold/turn</span>

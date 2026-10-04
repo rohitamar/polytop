@@ -32,16 +32,20 @@ test("independent browsers play one authoritative match including economy and co
     await expect(page.getByRole("button", { name: "Start game", exact: true })).toBeEnabled();
     await page.getByRole("button", { name: "Start game", exact: true }).click();
     for (const client of [page, guest]) await expect(client.getByTestId("active-player")).toContainText("Fern");
-    expect(await snapshot(guest)).toEqual(await snapshot(page));
+    const hostView = await snapshot(page), guestView = await snapshot(guest);
+    expect(guestView.revision).toBe(hostView.revision);
+    expect(guestView.perspectiveId).not.toBe(hostView.perspectiveId);
+    expect(Object.keys(hostView.exploration!)).toEqual([hostView.perspectiveId]);
+    expect(Object.keys(guestView.exploration!)).toEqual([guestView.perspectiveId]);
     await expect(guest.getByRole("button", { name: "End Turn", exact: true })).toBeDisabled();
     const neutralTerritory = await page.evaluate(() => window.__GAME_DEBUG__!.getTerritory().filter(tile => tile.cityId === "neutral-1"));
     await move(page, "warrior-1", 5, 5);
     for (const client of [page, guest]) await settled(client, 1);
-    expect(await snapshot(guest)).toEqual(await snapshot(page));
+    expect((await snapshot(guest)).revision).toBe((await snapshot(page)).revision);
     const territory = await page.evaluate(() => window.__GAME_DEBUG__!.getTerritory());
-    expect(await guest.evaluate(() => window.__GAME_DEBUG__!.getTerritory())).toEqual(territory);
+    expect(await guest.evaluate(() => window.__GAME_DEBUG__!.getTerritory())).not.toEqual(territory);
     const ownerId = (await snapshot(page)).players[0].id;
-    expect(territory.filter(tile => tile.cityId === "neutral-1")).toEqual(neutralTerritory.map(tile => ({ ...tile, playerId: ownerId })));
+    for (const tile of neutralTerritory) expect(territory.find(candidate => candidate.x === tile.x && candidate.y === tile.y)?.playerId).toBe(ownerId);
     const cityPosition = await page.evaluate(() => window.__GAME_DEBUG__!.getTileScreenPosition(4, 5));
     await page.mouse.click(cityPosition.x, cityPosition.y);
     const work = await page.evaluate(() => {
@@ -60,7 +64,7 @@ test("independent browsers play one authoritative match including economy and co
     }
     await move(guest, "warrior-2", 7, 4);
     for (const client of [page, guest]) await settled(client, 3);
-    expect(await snapshot(guest)).toEqual(await snapshot(page));
+    expect((await snapshot(guest)).revision).toBe((await snapshot(page)).revision);
     await guest.getByRole("button", { name: "End Turn", exact: true }).click();
     for (const client of [page, guest]) await settled(client, 4);
     expect((await snapshot(page)).players[0].resources.gold).toBeGreaterThan(goldBefore);
@@ -79,7 +83,7 @@ test("independent browsers play one authoritative match including economy and co
     await page.getByRole("button", { name: "Attack", exact: true }).click();
     for (const client of [page, guest]) await settled(client, 9);
     expect((await snapshot(page)).units.some(unit => unit.hp < unit.maxHp)).toBe(true);
-    expect(await snapshot(guest)).toEqual(await snapshot(page));
+    expect((await snapshot(guest)).revision).toBe((await snapshot(page)).revision);
     await page.screenshot({ path: "test-results/multiplayer-host.png" });
     await guest.screenshot({ path: "test-results/multiplayer-guest.png" });
   } finally {

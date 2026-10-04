@@ -55,3 +55,7 @@ HUD income includes Town Halls only. Resource panels display one-time Gold and t
 Future milestones may add persistence or deeper naval geography. This milestone excludes extra currencies, workers, passive resource income, advanced ships, markets, supply chains, fog of war, AI and a combat redesign.
 
 Starting cities retain safe land immediately around their centers and receive coastal Water within their territory when the default map includes water. Deterministic coastal placement preserves terrain totals and land routes. Port placement highlights currently buildable tiles using the same rule validator as authoritative construction.
+
+## Fog of war
+
+Vision uses Manhattan distance: unit radius 1, owned Town Hall radius 2, without terrain blocking. Each player's explored tiles persist independently. Unexplored tiles reveal nothing; explored tiles retain their last observed map and city information; currently visible tiles show live information. Unseen enemy units are removed from player views, and ranged attacks require current visibility. Roads and Ports require a visible construction site. Movement may enter unknown tiles when authoritative terrain and occupancy permit it.

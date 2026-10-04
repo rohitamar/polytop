@@ -31,6 +31,8 @@ import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import "@babylonjs/core/Culling/ray";
 import {
   isRoadConnected,
+  getTileVisibility,
+  TileVisibility,
   getPortBuildingReason,
   getTerritory,
   getTile,
@@ -141,6 +143,22 @@ export function createWorld(
     result.alpha = alpha;
     return result;
   };
+  const shadedMaterials = new Map<StandardMaterial, StandardMaterial>();
+  const shaded = (mat: StandardMaterial) => {
+    if (mat.name.endsWith(" remembered")) return mat;
+    let result = shadedMaterials.get(mat);
+    if (!result) {
+      result = mat.clone(`${mat.name} remembered`);
+      const gray = (mat.diffuseColor.r + mat.diffuseColor.g + mat.diffuseColor.b) / 3;
+      result.diffuseColor = mat.diffuseColor.scale(0.2).add(new Color3(gray, gray, gray).scale(0.22));
+      result.emissiveColor = mat.emissiveColor.scale(0.3);
+      shadedMaterials.set(mat, result);
+    }
+    return result;
+  };
+  let rememberedModel = false;
+  const fogMaterial = (mat: StandardMaterial, state: GameState, tile: Position) =>
+    getTileVisibility(state, state.perspectiveId!, tile) === TileVisibility.Explored ? shaded(mat) : mat;
   const grass = [
     material("meadow", "#9caf70"),
     material("sage", "#aab97b"),
@@ -227,7 +245,7 @@ export function createWorld(
     parent: TransformNode = root,
     cast = true,
   ) => {
-    mesh.material = mat;
+    mesh.material = rememberedModel ? shaded(mat) : mat;
     mesh.parent = parent;
     mesh.isPickable = false;
     if (buildingTerrain) decorations.push(mesh);
@@ -241,9 +259,12 @@ export function createWorld(
     depth: number,
     mat: StandardMaterial,
     parent?: TransformNode,
-  ) => mat.alpha < 1
+  ) => {
+    mat = rememberedModel ? shaded(mat) : mat;
+    return mat.alpha < 1
     ? solid(CreateBox(name, { width, height, depth }, scene), mat, parent)
     : repeated(`box:${width}:${height}:${depth}:${mat.name}`, () => solid(CreateBox(name, { width, height, depth }, scene), mat, parent));
+  };
   const cone = (
     name: string,
     height: number,
@@ -252,6 +273,7 @@ export function createWorld(
     parent?: TransformNode,
     top = 0,
   ) => {
+    mat = rememberedModel ? shaded(mat) : mat;
     return repeated(`cone:${height}:${bottom}:${top}:${mat.name}`, () => {
       const mesh = CreateCylinder(
         name,
@@ -268,7 +290,7 @@ export function createWorld(
     solid(mesh, mat, root, cast);
     if (cast) mesh.onDisposeObservable.add(() => shadows.removeShadowCaster(mesh));
     shadowDirty = true;
-  });
+  }, fogMaterial);
   let selectedResource: Position | null = null;
   const base = box("floating island", 1, 0.62, 1, earth);
   base.position.y = -0.45;
@@ -431,12 +453,15 @@ export function createWorld(
       ? currentState?.tiles.find(
           (t) => t.x === pickedUnit.x && t.y === pickedUnit.y,
         )
-      : metadata?.tile ? getTile(currentState, metadata.tile.x, metadata.tile.y) : undefined;
+      : metadata?.tile ? getTile(currentState, metadata.tile.x, metadata.tile.y) : metadata?.fog && pick?.pickedPoint ? {
+          x: Math.floor(pick.pickedPoint.x + currentState.width / 2),
+          y: Math.floor(pick.pickedPoint.z + currentState.height / 2),
+        } : undefined;
     if (info.type === PointerEventTypes.POINTERMOVE) {
       const key = tile ? positionKey(tile) : "";
       if (key !== hoveredKey) {
         hoveredKey = key;
-        onHover(tile ?? null);
+        onHover(tile && getTileVisibility(currentState, currentState.perspectiveId!, tile) === TileVisibility.Visible ? getTile(currentState, tile.x, tile.y) ?? null : null);
       }
       hover.setEnabled(!!tile);
       if (tile)
@@ -454,7 +479,9 @@ export function createWorld(
             : "grab";
     } else if (tile && (info.event as PointerEvent).button === 0) onClick(tile);
   }, PointerEventTypes.POINTERMOVE | PointerEventTypes.POINTERDOWN | PointerEventTypes.POINTERUP);
-  const rebuild = (state: GameState) => {
+  let terrainSignature = "";
+  const rebuild = (state: GameState, terrainOnly = false) => {
+    terrainSignature = JSON.stringify([state.width, state.height, state.perspectiveId, state.tiles.map(tile => [tile.x, tile.y, tile.terrain, getTileVisibility(state, state.perspectiveId!, tile)])]);
     shadowDirty = true;
     if (import.meta.env.DEV) profile.builds++;
     for (const mesh of decorations) mesh.dispose();
@@ -465,14 +492,17 @@ export function createWorld(
     currentState = state;
     base.scaling.set(state.width + 0.15, 1, state.height + 0.15);
     bottom.scaling.set(state.width - 0.2, 1, state.height - 0.2);
+    if (!terrainOnly) {
     defaultZoom = Math.max(state.width, state.height) * 0.81;
     zoom = defaultZoom;
     camera.radius = Math.max(state.width, state.height) * 2.2;
     camera.maxZ = Math.max(state.width, state.height) * 5;
     resize();
+    }
     buildingTerrain = true;
     const ripples: Mesh[] = [];
     for (const tile of state.tiles) {
+      rememberedModel = getTileVisibility(state, state.perspectiveId!, tile) === TileVisibility.Explored;
       const point = tilePoint(tile);
       const terrain = box(
         `tile-${tile.x}-${tile.y}`,
@@ -524,7 +554,7 @@ export function createWorld(
         cap.isPickable = true;
         cap.metadata = { tile };
       }
-      if (tile.terrain === "water") {
+      if (tile.terrain === "water" && !rememberedModel) {
         for (let i = 0; i < 2; i++) {
           const ripple = box("ripple", 0.18 + i * 0.12, 0.007, 0.018, foam);
           ripples.push(ripple as Mesh);
@@ -536,6 +566,7 @@ export function createWorld(
         }
       }
     }
+    rememberedModel = false;
     if (ripples.length) {
       const rippleSet = new Set<AbstractMesh>(ripples);
       for (const ripple of ripples) shadows.removeShadowCaster(ripple);
@@ -548,6 +579,7 @@ export function createWorld(
     }
     buildingTerrain = false;
     for (const mesh of decorations) mesh.freezeWorldMatrix();
+    if (!terrainOnly) {
     for (const warrior of warriors.values()) warrior.dispose();
     warriors.clear();
     ownerRings.clear();
@@ -559,6 +591,7 @@ export function createWorld(
         unit,
         state.players.findIndex((player) => player.id === unit.ownerId),
       );
+    }
     hover.setEnabled(false);
     hoveredKey = "";
     onHover(null);
@@ -568,7 +601,7 @@ export function createWorld(
   let territoryBuilds = 0;
   let territoryMeshes: Mesh[] = [];
   const updateTerritory = (state: GameState, cityId: string | null) => {
-    const signature = JSON.stringify([state.width, state.height, state.tiles, state.cities.map(city => [city.id, city.x, city.y, city.ownerId]), cityId]);
+    const signature = JSON.stringify([state.width, state.height, state.tiles, state.exploration?.[state.perspectiveId!]?.visibleTiles, state.cities.map(city => [city.id, city.x, city.y, city.ownerId]), cityId]);
     if (signature === territorySignature) return;
     territorySignature = signature;
     if (import.meta.env.DEV) territoryBuilds++;
@@ -589,7 +622,7 @@ export function createWorld(
       const point = tilePoint(tile);
       const index = state.players.findIndex(player => player.id === tile.playerId);
       if (index < 0) continue;
-      const mat = territoryMaterials[index];
+      const mat = fogMaterial(territoryMaterials[index], state, tile);
       for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
         const neighbor = byPosition.get(positionKey({ x: tile.x + dx, y: tile.y + dy }));
         if (neighbor?.cityId && neighbor.playerId === tile.playerId) continue;
@@ -619,9 +652,10 @@ export function createWorld(
     for (const tile of state.tiles.filter(tile => tile.road)) {
       const edges = [[0, -1], [1, 0], [0, 1], [-1, 0]].filter(([dx, dy]) => connected(tile.x + dx, tile.y + dy));
       const key = positionKey(tile);
-      const signature = `${state.width}:${state.height}:${edges.map(edge => edge.join(",")).join(";")}`;
+      const signature = `${getTileVisibility(state, state.perspectiveId!, tile)}:${state.width}:${state.height}:${edges.map(edge => edge.join(",")).join(";")}`;
       if (roadMeshes.get(key)?.signature === signature) continue;
       roadMeshes.get(key)?.node.dispose();
+      rememberedModel = getTileVisibility(state, state.perspectiveId!, tile) === TileVisibility.Explored;
       const node = new TransformNode(`road-${key}`, scene);
       node.position.copyFrom(tilePoint(tile));
       box("road center", 0.28, 0.035, 0.28, snow, node).position.y = 0.045;
@@ -631,20 +665,26 @@ export function createWorld(
       }
       for (const mesh of node.getChildMeshes()) mesh.isPickable = false;
       roadMeshes.set(key, { node, signature });
+      rememberedModel = false;
     }
   };
   const portMeshes = new Map<string, TransformNode>();
+  let portSignature = "";
   const updatePorts = (state: GameState) => {
+    const signature = JSON.stringify(state.tiles.filter(tile => tile.port).map(tile => [positionKey(tile), getTileVisibility(state, state.perspectiveId!, tile)]));
+    if (signature !== portSignature) { portMeshes.forEach(node => node.dispose()); portMeshes.clear(); portSignature = signature; }
     for (const [key, node] of portMeshes) if (!state.tiles.some(tile => tile.port && positionKey(tile) === key)) { node.dispose(); portMeshes.delete(key); }
     for (const tile of state.tiles.filter(tile => tile.port)) {
       const key = positionKey(tile);
       if (portMeshes.has(key)) continue;
+      rememberedModel = getTileVisibility(state, state.perspectiveId!, tile) === TileVisibility.Explored;
       const node = new TransformNode(`port-${key}`, scene);
       node.position.copyFrom(tilePoint(tile));
       box("port dock", 0.8, 0.12, 0.7, bark, node).position.y = 0.08;
       for (const x of [-0.32, 0.32]) for (const z of [-0.26, 0.26]) box("port piling", 0.08, 0.4, 0.08, bark, node).position.set(x, 0.16, z);
       for (const mesh of node.getChildMeshes()) mesh.isPickable = false;
       portMeshes.set(key, node);
+      rememberedModel = false;
     }
   };
   const portHighlightMaterial = material("port site", "#ffbf36");
@@ -667,13 +707,60 @@ export function createWorld(
   };
   const setPortPlacement = (playerId: string | null) => { portPlacementPlayer = playerId; updatePortHighlights(currentState); };
   const selectCity = (cityId: string | null) => { selectedCity = cityId; updateTerritory(currentState, cityId); resourceLayer.select(currentState, cityId, selectedResource); };
+  const unexploredFog = material("unexplored fog", "#17252f");
+  unexploredFog.disableLighting = true;
+  unexploredFog.emissiveColor = Color3.FromHexString("#17252f");
+  let fogMeshes: Mesh[] = [];
+  let fogSignature = "";
+  const updateFog = (state: GameState) => {
+    const memory = state.exploration?.[state.perspectiveId!];
+    const signature = JSON.stringify([state.width, state.height, state.perspectiveId, memory?.visibleTiles, memory?.exploredTiles]);
+    if (signature === fogSignature) return;
+    fogSignature = signature;
+    fogMeshes.forEach(mesh => mesh.dispose());
+    fogMeshes = [];
+    const visible = new Set(memory?.visibleTiles ?? []);
+    const explored = new Set(memory?.exploredTiles ?? []);
+    for (const mode of [TileVisibility.Unexplored]) {
+      const positions: number[] = [], indices: number[] = [];
+      for (let y = 0; y < state.height; y++) for (let x = 0; x < state.width; x++) {
+        const key = positionKey({ x, y });
+        if (visible.has(key) || (explored.has(key) ? TileVisibility.Explored : TileVisibility.Unexplored) !== mode) continue;
+        const px = x - (state.width - 1) / 2, pz = y - (state.height - 1) / 2;
+        const elevation = 0.15;
+        const offset = positions.length / 3;
+        positions.push(px - 0.5, elevation, pz - 0.5, px + 0.5, elevation, pz - 0.5, px + 0.5, elevation, pz + 0.5, px - 0.5, elevation, pz + 0.5);
+        indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
+      }
+      if (!positions.length) continue;
+      const mesh = new Mesh(mode, scene);
+      const data = new VertexData();
+      data.positions = positions; data.indices = indices; data.normals = [];
+      VertexData.ComputeNormals(positions, indices, data.normals);
+      data.applyToMesh(mesh);
+      solid(mesh, unexploredFog, root, false);
+      mesh.material!.backFaceCulling = false;
+      mesh.isPickable = mode === TileVisibility.Unexplored;
+      mesh.metadata = { fog: true };
+      mesh.freezeWorldMatrix();
+      fogMeshes.push(mesh);
+    }
+  };
   const update = (state: GameState, selectedUnitId: string | null) => {
+    const signature = JSON.stringify([state.width, state.height, state.perspectiveId, state.tiles.map(tile => [tile.x, tile.y, tile.terrain, getTileVisibility(state, state.perspectiveId!, tile)])]);
+    if (signature !== terrainSignature) rebuild(state, true);
+    updateFog(state);
+    for (const [id, model] of cityModels) if (!state.cities.some(city => city.id === id)) { model.node.dispose(); cityModels.delete(id); }
+    for (const [id, model] of warriors) if (!state.units.some(unit => unit.id === id)) {
+      model.dispose(); warriors.delete(id); ownerRings.delete(id);
+      healthLabels.get(id)?.dispose(); healthLabels.delete(id); healthValues.delete(id);
+    }
     shadowDirty = true;
     if (import.meta.env.DEV) profile.updates++;
     currentState = state;
     if (hoveredKey) {
       const [x, y] = hoveredKey.split(",").map(Number);
-      onHover(getTile(state, x, y) ?? null);
+      onHover(getTileVisibility(state, state.perspectiveId!, { x, y }) === TileVisibility.Visible ? getTile(state, x, y) ?? null : null);
     }
     updateTerritory(state, selectedCity);
     updateRoads(state);
@@ -683,9 +770,10 @@ export function createWorld(
     resourceLayer.select(state, selectedCity, selectedResource);
     selected = selectedUnitId;
     for (const city of state.cities) {
-      const signature = `${city.ownerId}:${city.townHallLevel}`;
+      const signature = `${city.ownerId}:${city.townHallLevel}:${getTileVisibility(state, state.perspectiveId!, city)}`;
       if (cityModels.get(city.id)?.signature === signature) continue;
       cityModels.get(city.id)?.node.dispose();
+      rememberedModel = getTileVisibility(state, state.perspectiveId!, city) === TileVisibility.Explored;
       const node = new TransformNode(city.id, scene);
       node.position.copyFrom(tilePoint(city));
       const index = state.players.findIndex(
@@ -743,9 +831,11 @@ export function createWorld(
         };
       }
       cityModels.set(city.id, { node, signature });
+      rememberedModel = false;
     }
     for (const unit of state.units) {
       if (!warriors.has(unit.id)) createWarrior(unit, state.players.findIndex(player => player.id === unit.ownerId));
+      warriors.get(unit.id)!.position.copyFrom(tilePoint(unit, true));
       scene.getMeshByName(`raft-${unit.id}`)?.setEnabled(!!unit.embarked);
       const texture = healthLabels.get(unit.id);
       const health = `${unit.hp}/${unit.maxHp}`;
@@ -810,7 +900,8 @@ export function createWorld(
   };
   const move = (unitId: string, path: Position[]) =>
     new Promise<void>((resolve) => {
-      const warrior = warriors.get(unitId)!;
+      const warrior = warriors.get(unitId);
+      if (!warrior) { resolve(); return; }
       animation = {
         unitId,
         path: [warrior.position.clone(), ...path.map(position => tilePoint(position, true))],
@@ -857,7 +948,7 @@ export function createWorld(
       });
     }
     for (const unit of before.units.filter(
-      (unit) => !after.units.some((next) => next.id === unit.id),
+      (unit) => unit.id === result.attackerId && result.attackerHp === 0 || unit.id === result.defenderId && result.defenderHp === 0,
     )) {
       const model = warriors.get(unit.id)!;
       await tween(300, (t) => {
@@ -873,7 +964,8 @@ export function createWorld(
     }
     if (result.advance) await move(result.attackerId, [result.advance]);
     for (const unit of after.units) {
-      const model = warriors.get(unit.id)!;
+      const model = warriors.get(unit.id);
+      if (!model) continue;
       model.position.copyFrom(tilePoint(unit, true));
       model.rotation.z = 0;
     }

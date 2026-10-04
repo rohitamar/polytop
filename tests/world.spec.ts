@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { WebSocket } from "ws";
-import { getReachableTiles, getTerritory, canUnitEnterTerrain, movementCost, positionKey, type GameState } from "../packages/game-core/src/index";
+import { createGame, getReachableTiles, getTerritory, canUnitEnterTerrain, movementCost, positionKey, type GameState } from "../packages/game-core/src/index";
 import type { LobbyServerMessage } from "../packages/protocol/src/index";
 import "../apps/web/src/debug";
 
@@ -34,7 +34,7 @@ function distances(state: GameState, target: { x: number; y: number }) {
   return result;
 }
 
-test("eight-player 30x30 match broadcasts terrain, captures territory and renders borders", async ({ page, browser }, testInfo) => {
+test("eight-player 30x30 match sanitizes terrain, captures territory and renders borders", async ({ page, browser }, testInfo) => {
   test.setTimeout(180000);
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const guest = await context.newPage();
@@ -73,18 +73,22 @@ test("eight-player 30x30 match broadcasts terrain, captures territory and render
     await expect.poll(async () => (await snapshot(guest)).width).toBe(30);
     let state = await snapshot(page);
     expect(state.height).toBe(30);
-    expect(state.tiles).toHaveLength(900);
+    expect(state.tiles.length).toBeLessThan(900);
+    expect(state.units).toHaveLength(1);
     expect(state.players).toHaveLength(8);
-    expect(await snapshot(guest)).toEqual(state);
-    for (const bot of bots) { await expect.poll(() => bot.state?.width).toBe(30); expect(bot.state).toEqual(state); }
+    expect((await snapshot(guest)).revision).toBe(state.revision);
+    for (const bot of bots) { await expect.poll(() => bot.state?.width).toBe(30); expect(bot.state!.perspectiveId).not.toBe(state.perspectiveId); }
     const initialStats = await page.evaluate(() => window.__GAME_DEBUG__!.getTerritoryRenderStats());
-    expect(initialStats.meshes).toBe(8);
+    expect(initialStats.meshes).toBe(1);
     const warrior = state.units[0];
-    const target = state.cities.filter(city => city.ownerId === null).sort((a, b) => (distances(state, a).get(positionKey(warrior)) ?? Infinity) - (distances(state, b).get(positionKey(warrior)) ?? Infinity))[0];
-    const before = getTerritory(state).filter(tile => tile.cityId === target.id);
-    for (let turn = 0; turn < 30 && state.cities.find(city => city.id === target.id)!.ownerId === null; turn++) {
-      const distance = distances(state, target);
-      const next = getReachableTiles(state, "warrior-1").sort((a, b) => (distance.get(positionKey(a)) ?? Infinity) - (distance.get(positionKey(b)) ?? Infinity))[0];
+    const canonical = createGame("fern-104", 8);
+    const planned = { ...state, tiles: canonical.tiles, perspectiveId: undefined };
+    const target = canonical.cities.filter(city => city.ownerId === null).sort((a, b) => (distances(planned, a).get(positionKey(warrior)) ?? Infinity) - (distances(planned, b).get(positionKey(warrior)) ?? Infinity))[0];
+    const before = getTerritory(canonical).filter(tile => tile.cityId === target.id);
+    for (let turn = 0; turn < 30 && state.cities.find(city => city.id === target.id)?.ownerId !== state.players[0].id; turn++) {
+      const planning = { ...state, tiles: canonical.tiles, perspectiveId: undefined };
+      const distance = distances(planning, target);
+      const next = getReachableTiles(planning, "warrior-1").sort((a, b) => (distance.get(positionKey(a)) ?? Infinity) - (distance.get(positionKey(b)) ?? Infinity))[0];
       expect(next).toBeDefined();
       const unit = state.units[0];
       await clickTile(page, unit.x, unit.y);
@@ -93,7 +97,7 @@ test("eight-player 30x30 match broadcasts terrain, captures territory and render
       await settled(page, state.revision + 1);
       await settled(guest, state.revision + 1);
       state = await snapshot(page);
-      if (state.cities.find(city => city.id === target.id)!.ownerId !== null) break;
+      if (state.cities.find(city => city.id === target.id)?.ownerId === state.players[0].id) break;
       await page.getByRole("button", { name: "End Turn", exact: true }).click();
       await settled(guest, state.revision + 1);
       await guest.getByRole("button", { name: "End Turn", exact: true }).click();
@@ -110,22 +114,22 @@ test("eight-player 30x30 match broadcasts terrain, captures territory and render
     }
     expect(state.cities.find(city => city.id === target.id)!.ownerId).toBe(state.players[0].id);
     const after = getTerritory(state);
-    expect(after.filter(tile => tile.cityId === target.id)).toEqual(before.map(tile => ({ ...tile, playerId: state.players[0].id })));
-    expect(await snapshot(guest)).toEqual(state);
-    expect(await guest.evaluate(() => window.__GAME_DEBUG__!.getTerritory())).toEqual(after);
-    for (const bot of bots) { await expect.poll(() => bot.state?.revision).toBe(state.revision); expect(bot.state).toEqual(state); expect(getTerritory(bot.state!)).toEqual(after); }
+    for (const tile of before) expect(after.find(claim => positionKey(claim) === positionKey(tile))?.playerId).toBe(state.players[0].id);
+    expect((await snapshot(guest)).revision).toBe(state.revision);
+    expect(await guest.evaluate(() => window.__GAME_DEBUG__!.getTerritory())).not.toEqual(after);
+    for (const bot of bots) { await expect.poll(() => bot.state?.revision).toBe(state.revision); expect(bot.state!.perspectiveId).not.toBe(state.perspectiveId); expect(Object.keys(bot.state!.exploration!)).toEqual([bot.state!.perspectiveId]); }
     await clickTile(page, target.x, target.y);
     await page.getByRole("button", { name: "Inspect resources", exact: true }).click();
     const resource = state.tiles.find(tile => tile.resource && after.some(claim => positionKey(claim) === positionKey(tile) && claim.cityId === target.id))!;
     await clickTile(page, resource.x, resource.y);
     await expect(page.getByRole("region", { name: "Resource tile", exact: true })).toContainText("Gold once");
     await expect(page.getByRole("button", { name: "Assign Civilian", exact: true })).toHaveCount(0);
-    expect(await snapshot(guest)).toEqual(state);
-    for (const bot of bots) expect(bot.state).toEqual(state);
+    expect((await snapshot(guest)).revision).toBe(state.revision);
+    for (const bot of bots) expect(bot.state!.perspectiveId).not.toBe(state.perspectiveId);
     for (const client of [page, guest]) {
       const resources = await client.evaluate(() => window.__GAME_DEBUG__!.getResourceRenderStats());
       expect(resources.developed).toBe(0);
-      expect(resources.opportunities).toBe(state.tiles.filter(tile => tile.resource).length);
+      expect(resources.opportunities).toBe((await snapshot(client)).tiles.filter(tile => tile.resource).length);
     }
     for (const client of [page, guest]) {
       if (client === guest) {
@@ -134,8 +138,10 @@ test("eight-player 30x30 match broadcasts terrain, captures territory and render
         await settled(page, state.revision + 1);
         await settled(guest, state.revision + 1);
       }
-      await clickTile(client, target.x, target.y);
-      await expect.poll(() => client.evaluate(() => window.__GAME_DEBUG__!.getTerritoryRenderStats().selectedCityId)).toBe(target.id);
+      const clientState = await snapshot(client);
+      const city = clientState.cities.find(city => city.ownerId === clientState.perspectiveId)!;
+      await clickTile(client, city.x, city.y);
+      await expect.poll(() => client.evaluate(() => window.__GAME_DEBUG__!.getTerritoryRenderStats().selectedCityId)).toBe(city.id);
       const stats = await client.evaluate(() => window.__GAME_DEBUG__!.getTerritoryRenderStats());
       expect(stats.meshes).toBeLessThanOrEqual(10);
       expect(stats.builds).toBeGreaterThan(initialStats.builds);
@@ -154,7 +160,7 @@ test("large and rectangular boards preserve batching and avoid hover rebuilds", 
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
   for (const dimensions of [{ width: 30, height: 30 }, { width: 32, height: 18 }]) {
     await page.evaluate(dimensions => window.__GAME_DEBUG__!.setWorld("fern-104", 8, dimensions), dimensions);
-    expect((await snapshot(page)).tiles).toHaveLength(dimensions.width * dimensions.height);
+    expect((await snapshot(page)).tiles.length).toBeLessThan(dimensions.width * dimensions.height);
     expect(await page.evaluate(() => window.__GAME_DEBUG__!.getHoveredTile())).toBe("");
     const before = await page.evaluate(() => ({ render: window.__GAME_DEBUG__!.getTerritoryRenderStats(), profile: window.__GAME_DEBUG__!.getProfile() }));
     for (let i = 0; i < 12; i++) await page.mouse.move(500 + i * 20, 480);
@@ -163,11 +169,11 @@ test("large and rectangular boards preserve batching and avoid hover rebuilds", 
     expect(after.profile.builds).toBe(before.profile.builds);
     expect(after.profile.materials).toBe(before.profile.materials);
     expect(after.profile.loops).toBe(1);
-    expect(after.render.meshes).toBe(8);
+    expect(after.render.meshes).toBe(1);
     const city = (await snapshot(page)).cities[0];
     await clickTile(page, city.x, city.y);
     await expect.poll(() => page.evaluate(() => window.__GAME_DEBUG__!.getTerritoryRenderStats().selectedCityId)).toBe(city.id);
-    expect((await page.evaluate(() => window.__GAME_DEBUG__!.getTerritoryRenderStats())).meshes).toBe(9);
+    expect((await page.evaluate(() => window.__GAME_DEBUG__!.getTerritoryRenderStats())).meshes).toBe(2);
     await page.screenshot({ path: testInfo.outputPath(`${dimensions.width}x${dimensions.height}-city.png`) });
   }
 });

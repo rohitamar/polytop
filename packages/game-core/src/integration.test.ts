@@ -10,6 +10,7 @@ function fixture(): GameState {
   state.units = [{ ...state.units[0], x: 0, y: 2, homeCityId: "home", unitType: "rider", maxMovement: 2, movement: 2 }];
   state.players[0].resources.gold = 50;
   state.players[0].technologies = ["roads", "riding", "fishing"];
+  state.units.push(...[3, 4, 8].map(x => ({ ...state.units[0], id: `observer-${x}`, x, y: 1, movement: 0, populationCost: 0 })));
   return state;
 }
 const road = (state: GameState, x: number, y = 2) => applyAction(state, { type: "BUILD_ROAD", playerId: "player-1", to: { x, y } });
@@ -113,6 +114,7 @@ describe("playtest integration baseline", () => {
 
   it("embarks an existing unit, traverses enemy water and collects Fish once", () => {
     let state = fixture();
+    state.units = state.units.filter(unit => !unit.id.startsWith("observer-"));
     state.cities[0].x = 6;
     state.units[0].x = 6;
     for (let x = 6; x <= 9; x++) getTile(state, x, 1)!.terrain = "water";

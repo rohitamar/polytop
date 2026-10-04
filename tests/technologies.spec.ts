@@ -45,7 +45,7 @@ test("technology purchases synchronize separate player unlocks through real cont
     await archery.getByRole("button", { name: "Unlock Archery" }).click();
     await settled(page, 5);
     await expect.poll(async () => (await snapshot(guest)).revision).toBe(5);
-    expect(await snapshot(guest)).toEqual(await snapshot(page));
+    expect((await snapshot(guest)).revision).toBe((await snapshot(page)).revision);
     expect((await snapshot(page)).players.map(player => player.technologies)).toEqual([["archery"], []]);
     expect((await snapshot(page)).players[0].resources.gold).toBe(goldBefore - 6);
     await expect(archery).toContainText("Unlocked");
@@ -56,8 +56,9 @@ test("technology purchases synchronize separate player unlocks through real cont
     await guest.getByRole("button", { name: "Unlock Roads" }).click();
     await settled(guest, 7);
     await expect.poll(async () => (await snapshot(page)).revision).toBe(7);
-    expect(await snapshot(guest)).toEqual(await snapshot(page));
-    expect((await snapshot(page)).players.map(player => player.technologies)).toEqual([["archery"], ["roads"]]);
+    expect((await snapshot(guest)).revision).toBe((await snapshot(page)).revision);
+    expect((await snapshot(page)).players.map(player => player.technologies)).toEqual([["archery"], []]);
+    expect((await snapshot(guest)).players.map(player => player.technologies)).toEqual([[], ["roads"]]);
     await expect(guest.getByRole("article", { name: "Archery", exact: true })).toContainText("Locked");
     await page.screenshot({ path: "test-results/technologies-host.png" });
     await guest.screenshot({ path: "test-results/technologies-guest.png" });
@@ -71,8 +72,9 @@ test("technology purchases synchronize separate player unlocks through real cont
     await page.mouse.click(tile.x, tile.y);
     await settled(page, 9);
     await expect.poll(async () => (await snapshot(guest)).revision).toBe(9);
-    expect(await snapshot(guest)).toEqual(await snapshot(page));
-    expect((await snapshot(page)).players.map(player => player.technologies)).toEqual([["archery"], ["roads"]]);
+    expect((await snapshot(guest)).revision).toBe((await snapshot(page)).revision);
+    expect((await snapshot(page)).players.map(player => player.technologies)).toEqual([["archery"], []]);
+    expect((await snapshot(guest)).players.map(player => player.technologies)).toEqual([[], ["roads"]]);
   } finally {
     await context.close();
   }

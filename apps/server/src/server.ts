@@ -1,4 +1,4 @@
-import { applyAction, createGame, type GameState } from "@reach/game-core";
+import { applyAction, createGame, getReachableTiles, getPlayerView, getPlayerAction, updatePlayerExploration, type GameState } from "@reach/game-core";
 import { randomInt, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
@@ -112,7 +112,7 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
           previous.close();
         }
         broadcast(room);
-        send(socket, { type: "MATCH_STATE", state: room.state, action: null });
+        send(socket, { type: "MATCH_STATE", state: getPlayerView(room.state, member.player.id), action: null });
         return;
       }
       if (message.type === "LEAVE_ROOM") {
@@ -131,20 +131,22 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
             if (room.members.length < 2) throw new Error("At least two players are required");
             const initial = createGame(options.seed ?? randomUUID(), room.members.length, options.demo && room.members.length === 2 ? { scenario: "demo" } : {});
             const ids = new Map(initial.players.map((player, i) => [player.id, room.members[i].player.id]));
-            room.state = { ...initial, activePlayerId: member.player.id,
+            room.state = updatePlayerExploration({ ...initial, exploration: undefined, activePlayerId: member.player.id,
               players: initial.players.map((player, i) => ({ ...player, id: room.members[i].player.id, name: room.members[i].player.name })),
               units: initial.units.map(unit => ({ ...unit, ownerId: ids.get(unit.ownerId)! })),
-              cities: initial.cities.map(city => ({ ...city, ownerId: city.ownerId ? ids.get(city.ownerId)! : null })) };
-            for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: room.state, action: null });
+              cities: initial.cities.map(city => ({ ...city, ownerId: city.ownerId ? ids.get(city.ownerId)! : null })) });
+            for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: getPlayerView(room.state, participant.player.id), action: null });
           } else {
             if (!room.state) throw new Error("Match has not started");
             if (member.acceptedRequests?.has(message.requestId)) throw new Error("Request already accepted");
             if (message.expectedRevision !== room.state.revision) throw new Error("State changed. Try again.");
             const action = { ...message.action, playerId: member.player.id };
+            if ("unitId" in action && !room.state.units.some(unit => unit.id === action.unitId && unit.ownerId === member.player.id)) throw new Error("Not your unit or turn");
+            const path = action.type === "move" ? getReachableTiles(room.state, action.unitId).find(tile => tile.x === action.to.x && tile.y === action.to.y)?.path : undefined;
             room.state = applyAction(room.state, action);
             member.acceptedRequests ??= new Set();
             member.acceptedRequests.add(message.requestId);
-            for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: room.state, action });
+            for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: getPlayerView(room.state, participant.player.id), action: getPlayerAction(participant.player.id, action), ...(participant === member && path ? { path } : {}) });
           }
         } catch (error) {
           const reason = error instanceof Error ? error.message : "Action rejected";

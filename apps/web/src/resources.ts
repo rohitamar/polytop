@@ -3,13 +3,13 @@ import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import type { Scene } from "@babylonjs/core/scene";
 import type { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import type { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { getTerritory, positionKey, type GameState, type Position } from "@reach/game-core";
+import { getTerritory, positionKey, isTileVisible, type GameState, type Position } from "@reach/game-core";
 
 export const opportunityNames = { orchard: "Orchard", wheat: "Wheat", fishery: "Fish", forest: "Forest", mine: "Mine" } as const;
 type Batch = { positions: number[]; indices: number[] };
 type Palette = Record<"wood" | "leaf" | "fruit" | "crop" | "soil" | "stone" | "dark" | "ivory", StandardMaterial>;
 
-export function createResourceLayer(scene: Scene, palette: Palette, point: (position: Position) => Vector3, attach: (mesh: Mesh, mat: StandardMaterial, cast: boolean) => void) {
+export function createResourceLayer(scene: Scene, palette: Palette, point: (position: Position) => Vector3, attach: (mesh: Mesh, mat: StandardMaterial, cast: boolean) => void, shade: (mat: StandardMaterial, state: GameState, tile: Position) => StandardMaterial = mat => mat) {
   let signature = "", selectionSignature = "";
   let meshes: Mesh[] = [], hints: Mesh[] = [];
   let builds = 0, opportunities = 0, developed = 0;
@@ -49,7 +49,7 @@ export function createResourceLayer(scene: Scene, palette: Palette, point: (posi
     return { box, roof, finish };
   };
   const update = (state: GameState) => {
-    const next = JSON.stringify([state.width, state.height, state.tiles.map(tile => [tile.x, tile.y, tile.terrain, tile.resource])]);
+    const next = JSON.stringify([state.width, state.height, state.tiles.map(tile => [tile.x, tile.y, tile.terrain, tile.resource, state.exploration?.[state.perspectiveId!]?.visibleTiles.includes(positionKey(tile))])]);
     if (next === signature) return;
     signature = next;
     if (import.meta.env.DEV) builds++;
@@ -65,8 +65,8 @@ export function createResourceLayer(scene: Scene, palette: Palette, point: (posi
       const variation = ((tile.x * 73 + tile.y * 151) % 97) / 97;
       p.x += (variation - 0.5) * 0.3;
       p.z += (((tile.x * 137 + tile.y * 47) % 89) / 89 - 0.5) * 0.3;
-      const b = (mat: StandardMaterial, x: number, y: number, z: number, w: number, h: number, d: number) => box(mat, p.x + x, p.y + y, p.z + z, w, h, d);
-      const r = (mat: StandardMaterial, x: number, y: number, z: number, w: number, h: number) => roof(mat, p.x + x, p.y + y, p.z + z, w, h);
+      const b = (mat: StandardMaterial, x: number, y: number, z: number, w: number, h: number, d: number) => box(shade(mat, state, tile), p.x + x, p.y + y, p.z + z, w, h, d);
+      const r = (mat: StandardMaterial, x: number, y: number, z: number, w: number, h: number) => roof(shade(mat, state, tile), p.x + x, p.y + y, p.z + z, w, h);
       if (tile.resource === "orchard") {
         b(palette.wood, 0, 0.14, 0, 0.055, 0.25, 0.055);
         r(palette.leaf, 0, 0.17, 0, 0.26, 0.22);
@@ -99,6 +99,7 @@ export function createResourceLayer(scene: Scene, palette: Palette, point: (posi
     const { box, finish } = batches();
     for (const resource of state.tiles) {
       const focused = positionKey(resource) === selectedTile;
+      if (state.perspectiveId && !isTileVisible(state, state.perspectiveId, resource)) continue;
       if (!resource.resource || !focused && (!cityId || claims.get(positionKey(resource)) !== cityId)) continue;
       const p = point(resource);
       for (const [dx, dz] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) box(palette.crop, p.x + dx * 0.34, p.y + 0.07, p.z + dz * 0.34, focused ? 0.15 : 0.08, 0.022, focused ? 0.15 : 0.08);

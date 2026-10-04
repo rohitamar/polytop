@@ -32,7 +32,7 @@ test("road controls build shared infrastructure, reject invalid tiles and recove
       for (const client of [page, guest]) await expect.poll(async () => (await snapshot(client)).revision).toBe(revision);
       const state = await snapshot(page);
       await expect((state.activePlayerId === state.players[0].id ? page : guest).getByRole("button", { name: "End Turn", exact: true })).toBeEnabled();
-      expect(await snapshot(page)).toEqual(await snapshot(guest));
+      expect((await snapshot(page)).revision).toBe((await snapshot(guest)).revision);
     };
     const round = async () => {
       for (const client of [page, guest]) {
@@ -60,18 +60,18 @@ test("road controls build shared infrastructure, reject invalid tiles and recove
     await build.click();
     await settled(10);
     expect((await snapshot(page)).players[0].resources.gold).toBe(gold - 3);
-    expect((await snapshot(guest)).tiles.find(tile => tile.x === 4 && tile.y === 4)?.road).toBe(true);
+    expect((await snapshot(guest)).tiles.find(tile => tile.x === 4 && tile.y === 4)).toBeUndefined();
     await expect(build).toBeDisabled();
     await expect(panel).toContainText("Already road-connected");
     await tile(page, 7, 4);
     await expect(build).toBeDisabled();
-    await expect(panel).toContainText("Enemy-controlled land");
+    await expect(panel).toContainText("Explore this tile first");
     await page.getByRole("button", { name: "Cancel roads" }).click();
     await round();
     const neutral = await page.evaluate(() => {
       const debug = window.__GAME_DEBUG__!;
       const state = debug.getState();
-      return state.tiles.find(tile => tile.x >= 8 && tile.x <= 12 && tile.y >= 6 && tile.y <= 10 && tile.terrain === "grass" && !debug.getTileTerritory(tile.x, tile.y)?.playerId && !state.cities.some(city => city.x === tile.x && city.y === tile.y))!;
+      return state.tiles.find(tile => tile.terrain === "grass" && !tile.road && debug.getTileTerritory(tile.x, tile.y)?.playerId === state.perspectiveId && !state.cities.some(city => city.x === tile.x && city.y === tile.y))!;
     });
     expect(neutral).toBeDefined();
     await page.getByRole("button", { name: "Build Roads", exact: true }).click();
@@ -84,7 +84,7 @@ test("road controls build shared infrastructure, reject invalid tiles and recove
     await page.reload();
     await expect.poll(async () => (await snapshot(page)).revision).toBe(saved.revision);
     expect(await snapshot(page)).toEqual(saved);
-    expect(await snapshot(guest)).toEqual(saved);
+    expect((await snapshot(guest)).revision).toBe(saved.revision);
     await expect(page.getByTestId("gold")).toHaveText(String(saved.players[0].resources.gold));
     await page.screenshot({ path: testInfo.outputPath("roads-reconnected.png") });
     expect(errors).toEqual([]);

@@ -1,6 +1,8 @@
 import { generateWorld, placeResources, resourceRules, type WorldConfig } from "./world";
 import { getTechnology, getTechnologyCost, getTechnologyUnlockReason, hasTechnology, type TechnologyId } from "./technologies";
 import { getUnitDefinition, getUnitStats, type UnitType } from "./units";
+import { computeVisibleTiles, isTileVisible, updatePlayerExploration, type PlayerExploration } from "./fog";
+export { TileVisibility, visionRules, tilesInRange, computeVisibleTiles, updatePlayerExploration, getTileVisibility, isTileVisible, isTileExplored, getPlayerView, getPlayerAction, type PlayerView, type PlayerExploration } from "./fog";
 export { unitDefinitions, getUnitDefinition, type UnitType, type UnitDefinition } from "./units";
 export { technologies, technologyPrerequisites, getTechnology, getTechnologyCost, hasTechnology, canUnlockTechnology, getTechnologyUnlockReason, type TechnologyId } from "./technologies";
 export { getMapSize, mapSizes, terrainRules, resourceRules, type WorldConfig } from "./world";
@@ -83,6 +85,9 @@ export type Unit = Position & {
   hasAttacked: boolean;
 };
 export type GameState = {
+  exploration?: Record<string, PlayerExploration>;
+  perspectiveId?: string;
+  rememberedTerritory?: TileTerritory[];
   seed: string;
   width: number;
   height: number;
@@ -110,11 +115,11 @@ function claimTile(state: GameState, tile: Position, radius: number): TileTerrit
 }
 export function getTerritory(state: GameState, radius: number = territoryRules.radius): TileTerritory[] {
   if (!Number.isInteger(radius) || radius < 0) throw new Error("Invalid territory radius");
-  return state.tiles.map(tile => claimTile(state, tile, radius));
+  return state.rememberedTerritory ?? state.tiles.map(tile => claimTile(state, tile, radius));
 }
 export const getTileTerritory = (state: GameState, x: number, y: number) => {
   const tile = getTile(state, x, y);
-  return tile ? claimTile(state, tile, territoryRules.radius) : undefined;
+  return tile ? state.rememberedTerritory?.find(claim => positionKey(claim) === positionKey(tile)) ?? claimTile(state, tile, territoryRules.radius) : undefined;
 };
 
 export type GameAction =
@@ -156,6 +161,7 @@ export function getRoadBuildingReason(state: GameState, playerId: string, positi
   if (!player || state.activePlayerId !== playerId) return "Not your turn";
   if (!hasTechnology(state, playerId, "roads")) return "Requires Roads";
   if (!Number.isSafeInteger(position.x) || !Number.isSafeInteger(position.y) || position.x < 0 || position.y < 0 || position.x >= state.width || position.y >= state.height) return "Invalid tile";
+  if (!isTileVisible(state, playerId, position)) return "Explore this tile first";
   const tile = getTile(state, position.x, position.y);
   if (!tile) return "Invalid tile";
   if (tile.terrain !== "grass" && tile.terrain !== "forest") return "Roads require traversable land";
@@ -173,6 +179,7 @@ export function getPortBuildingReason(state: GameState, playerId: string, positi
   if (!hasTechnology(state, playerId, "fishing")) return "Requires Fishing";
   if (!Number.isSafeInteger(position.x) || !Number.isSafeInteger(position.y) || position.x < 0 || position.y < 0 || position.x >= state.width || position.y >= state.height) return "Invalid tile";
   const tile = getTile(state, position.x, position.y);
+  if (!isTileVisible(state, playerId, position)) return "Explore this tile first";
   if (!tile || tile.terrain !== "water") return "Ports require Water";
   if (getTileTerritory(state, tile.x, tile.y)?.playerId !== playerId) return "Requires owned territory";
   if (![[0, -1], [1, 0], [0, 1], [-1, 0]].some(([dx, dy]) => { const neighbor = getTile(state, tile.x + dx, tile.y + dy); return neighbor && neighbor.terrain !== "water"; })) return "Requires coastal Water";
@@ -291,7 +298,7 @@ export function createGame(seed = "fern-104", playerCount = 2, config: WorldConf
   }
   if (config.scenario === "demo") getTile(state, 4, 3)!.resource = "wheat";
   state.players[0].resources.gold = calculateGoldPerTurn(state, state.activePlayerId);
-  return state;
+  return updatePlayerExploration(state);
 }
 
 export function getReachableTiles(
@@ -322,7 +329,7 @@ export function getReachableTiles(
         next.y >= state.height
       )
         continue;
-      const tile = getTile(state, next.x, next.y);
+      const tile = getTile(state, next.x, next.y) ?? (state.perspectiveId ? { ...next, terrain: unit.embarked ? "water" as const : "grass" as const } : undefined);
       if (dx && dy && !unit.embarked && tile?.terrain !== "water") continue;
       if (
         !tile || !canUnitEnterTile(state, unit, current, tile) ||
@@ -368,16 +375,18 @@ export type CombatPreview = {
   advance: Position | null;
 };
 
-const distance = (a: Position, b: Position) =>
+export const gridDistance = (a: Position, b: Position) =>
   Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+const distance = gridDistance;
 
 export function getAttackTargets(state: GameState, unitId: string): Unit[] {
   const unit = state.units.find((candidate) => candidate.id === unitId);
   if (!unit || unit.ownerId !== state.activePlayerId || unit.hasAttacked || unit.embarked)
     return [];
+  const visible = computeVisibleTiles(state, unit.ownerId);
   return state.units.filter(
     (target) =>
-      target.ownerId !== unit.ownerId && distance(unit, target) <= unit.range,
+      target.ownerId !== unit.ownerId && distance(unit, target) <= unit.range && visible.has(positionKey(target)),
   );
 }
 
@@ -460,6 +469,19 @@ export function getRecruitmentReason(state: GameState, playerId: string, cityId:
 export const canRecruitUnit = (state: GameState, playerId: string, cityId: string, unitType: string) => getRecruitmentReason(state, playerId, cityId, unitType) === null;
 
 export function applyAction(state: GameState, action: GameAction): GameState {
+  if (state.perspectiveId) throw new Error("Player views cannot apply authoritative actions");
+  let discovered = updatePlayerExploration(state);
+  const next = transition(state, action);
+  if (action.type === "move") {
+    const destination = getReachableTiles(state, action.unitId).find(tile => positionKey(tile) === positionKey(action.to));
+    for (const position of destination?.path ?? []) {
+      discovered = updatePlayerExploration({ ...next, exploration: discovered.exploration, units: next.units.map(unit => unit.id === action.unitId ? { ...unit, ...position } : unit) });
+    }
+  }
+  return updatePlayerExploration({ ...next, exploration: discovered.exploration });
+}
+
+function transition(state: GameState, action: GameAction): GameState {
   if (
     action.type !== "move" &&
     action.type !== "ATTACK_UNIT" &&

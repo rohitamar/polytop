@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { createGame, getPlayerView } from "@reach/game-core";
 import {
   parseLobbyClientMessage,
   parseLobbyServerMessage,
@@ -74,4 +75,12 @@ it("accepts Port intents without client cost or ownership overrides", () => {
   const action = { type: "BUILD_PORT", to: { x: 4, y: 4 } };
   expect(parseLobbyClientMessage({ ...envelope, action })).toEqual({ ...envelope, action });
   for (const invalid of [{ ...action, goldCost: 0 }, { ...action, playerId: "other" }, { ...action, to: { x: 4.5, y: 4 } }]) expect(parseLobbyClientMessage({ ...envelope, action: invalid })).toBeNull();
+});
+
+it("requires a player-specific exploration snapshot in match messages", () => {
+  const state = createGame();
+  expect(parseLobbyServerMessage({ type: "MATCH_STATE", state, action: null })).toBeNull();
+  const message = { type: "MATCH_STATE", state: getPlayerView(state, "player-1"), action: null };
+  expect(parseLobbyServerMessage(message)).toEqual(message);
+  expect(parseLobbyServerMessage({ ...message, state: { ...message.state, exploration: state.exploration } })).toBeNull();
 });

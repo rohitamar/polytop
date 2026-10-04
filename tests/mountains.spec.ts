@@ -5,15 +5,23 @@ test("mountain mines require Mining and show one-time Gold rewards on a 30x30 bo
   await page.goto("/");
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
   await page.evaluate(() => window.__GAME_DEBUG__!.setWorld("fern-104", 8));
-  const target = await page.evaluate(() => {
+  let target;
+  for (let i = 0; i < 8; i++) {
+    target = await page.evaluate(() => {
     const debug = window.__GAME_DEBUG__!;
     const state = debug.getState();
     const claims = debug.getTerritory();
     const city = state.cities.find(city => city.ownerId && state.tiles.some(tile => tile.terrain === "mountain" && claims.some(claim => claim.x === tile.x && claim.y === tile.y && claim.cityId === city.id)))!;
     const tile = state.tiles.find(tile => tile.terrain === "mountain" && claims.some(claim => claim.x === tile.x && claim.y === tile.y && claim.cityId === city.id))!;
+    if (!city || !tile) return null;
     const unit = state.units.find(unit => unit.ownerId === city.ownerId)!;
     return { city, tile, unit };
   });
+    if (target) break;
+    await page.getByRole("button", { name: "End Turn", exact: true }).click();
+  }
+  expect(target).toBeTruthy();
+  if (!target) throw new Error("No visible mountain found");
   while (await page.evaluate(() => window.__GAME_DEBUG__!.getState().activePlayerId) !== target.city.ownerId) await page.getByRole("button", { name: "End Turn", exact: true }).click();
   const unitPoint = await page.evaluate(unit => window.__GAME_DEBUG__!.getUnitScreenPosition(unit.id), target.unit);
   await page.mouse.click(unitPoint.x, unitPoint.y);

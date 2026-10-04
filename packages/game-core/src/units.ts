@@ -1,6 +1,7 @@
 import type { TechnologyId } from "./technologies";
 
 export type UnitDefinition = {
+  visionRadius?: number;
   id: string;
   name: string;
   goldCost: number;

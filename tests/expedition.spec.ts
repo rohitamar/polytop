@@ -182,5 +182,6 @@ test("rejects blocked moves, protects debug snapshots, resets seed and supports 
   await page.evaluate(() => window.__GAME_DEBUG__!.setSeed("new-island"));
   expect(
     await page.evaluate(() => window.__GAME_DEBUG__!.getState().seed),
-  ).toBe("new-island");
+  ).toBe("");
+  expect((await page.evaluate(() => window.__GAME_DEBUG__!.getState())).tiles).not.toEqual(before.tiles);
 });

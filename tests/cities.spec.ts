@@ -21,7 +21,7 @@ test("automatic Gold income and Town Hall capacity use real city controls", asyn
   await page.screenshot({ path: testInfo.outputPath("town-center-level-1.png") });
   const turn = page.getByRole("button", { name: "End Turn", exact: true });
   await turn.click();
-  expect((await page.evaluate(() => window.__GAME_DEBUG__!.getState())).players[0].resources.gold).toBe(income);
+  expect((await page.evaluate(() => window.__GAME_DEBUG__!.getState())).players[0].resources.gold).toBe(0);
   await turn.click();
   await selectCity();
   expect((await page.evaluate(() => window.__GAME_DEBUG__!.getState())).players[0].resources.gold).toBe(income * 2);
