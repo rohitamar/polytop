@@ -195,14 +195,6 @@ function App() {
   );
   const unit =
     state.units.find((unit) => unit.id === selected) ?? activeUnits[0];
-  const availableMovement = activeUnits.reduce(
-    (total, unit) => total + unit.movement,
-    0,
-  );
-  const maximumMovement = activeUnits.reduce(
-    (total, unit) => total + unit.maxMovement,
-    0,
-  );
 
   const combat =
     selected &&
@@ -601,7 +593,7 @@ function App() {
             <strong data-testid="active-player">{activePlayer.name}'s turn</strong>
           </div>
         </div>
-        <div className="turn-summary">{activeUnits.length} unit{activeUnits.length === 1 ? "" : "s"} · {availableMovement}/{maximumMovement} movement</div>
+        <div className="turn-summary">{activeUnits.length} unit{activeUnits.length === 1 ? "" : "s"}</div>
       </aside>
       {city && cityProduction && (
         <section className="city-panel" aria-label="Selected city">
