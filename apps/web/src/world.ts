@@ -707,27 +707,17 @@ export function createWorld(
   };
   const setPortPlacement = (playerId: string | null) => { portPlacementPlayer = playerId; updatePortHighlights(currentState); };
   const selectCity = (cityId: string | null) => { selectedCity = cityId; updateTerritory(currentState, cityId); resourceLayer.select(currentState, cityId, selectedResource); };
-  const unexploredFog = material("unexplored fog", "#17252f");
+  const unexploredFog = material("unexplored fog", "#c9d6ff");
   unexploredFog.disableLighting = true;
-  unexploredFog.emissiveColor = Color3.FromHexString("#17252f");
+  unexploredFog.emissiveColor = Color3.FromHexString("#c9d6ff");
+  unexploredFog.backFaceCulling = false;
   const cloudFog = material("cloud fog", "#ffffff");
   cloudFog.disableLighting = true;
   cloudFog.emissiveColor = Color3.White();
-  cloudFog.useAlphaFromDiffuseTexture = true;
   cloudFog.backFaceCulling = false;
-  let cloudTexture: DynamicTexture | null = null;
-  let cloudPixels: ImageData | null = null;
-  const fogNoise = (x: number, y: number) => {
-    const hash = (a: number, b: number) => {
-      const value = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
-      return value - Math.floor(value);
-    };
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
-    const top = hash(ix, iy) * (1 - sx) + hash(ix + 1, iy) * sx;
-    const bottom = hash(ix, iy + 1) * (1 - sx) + hash(ix + 1, iy + 1) * sx;
-    return top * (1 - sy) + bottom * sy;
+  const cloudVariation = (x: number, y: number) => {
+    const value = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return value - Math.floor(value);
   };
   let fogMeshes: Mesh[] = [];
   let fogSignature = "";
@@ -738,95 +728,79 @@ export function createWorld(
     fogSignature = signature;
     fogMeshes.forEach(mesh => mesh.dispose());
     fogMeshes = [];
-    const visible = new Set(memory?.visibleTiles ?? []);
     const explored = new Set(memory?.exploredTiles ?? []);
-    const fogged = new Uint8Array(state.width * state.height);
-    const fogBorder = new Uint8Array(fogged.length);
+    const unknown = (x: number, y: number) => x >= 0 && y >= 0 && x < state.width && y < state.height && !explored.has(positionKey({ x, y }));
+    const positions: number[] = [], indices: number[] = [], normals: number[] = [], colors: number[] = [];
+    const pickPositions: number[] = [], pickIndices: number[] = [];
+    const light = new Vector3(-0.5, 1, -0.7).normalize();
+    const facet = (a: Vector3, b: Vector3, c: Vector3, wall = false) => {
+      const normal = Vector3.Cross(b.subtract(a), c.subtract(a)).normalize();
+      if (!wall && normal.y < 0) normal.scaleInPlace(-1);
+      const brightness = Math.max(0, Vector3.Dot(normal, light));
+      const color = wall
+        ? new Color3(0.65 + brightness * 0.22, 0.73 + brightness * 0.2, 0.98)
+        : new Color3(0.64 + brightness * 0.36, 0.73 + brightness * 0.27, 1);
+      const offset = positions.length / 3;
+      for (const point of [a, b, c]) {
+        positions.push(point.x, point.y, point.z);
+        normals.push(normal.x, normal.y, normal.z);
+        colors.push(color.r, color.g, color.b, 1);
+      }
+      indices.push(offset, offset + 1, offset + 2);
+    };
+    const corner = (x: number, y: number) => new Vector3(
+      x / 2 - state.width / 2,
+      0.32 + cloudVariation(x, y) * 0.12,
+      y / 2 - state.height / 2,
+    );
+    const wall = (a: Vector3, b: Vector3) => {
+      const baseA = new Vector3(a.x, 0.15, a.z), baseB = new Vector3(b.x, 0.15, b.z);
+      facet(a, baseA, b, true);
+      facet(b, baseA, baseB, true);
+    };
     for (let y = 0; y < state.height; y++) for (let x = 0; x < state.width; x++) {
-      fogged[y * state.width + x] = explored.has(positionKey({ x, y })) ? 0 : 1;
-    }
-    for (let y = 0; y < state.height; y++) for (let x = 0; x < state.width; x++) {
-      if (fogged[y * state.width + x]) continue;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx, ny = y + dy;
-        if (nx >= 0 && ny >= 0 && nx < state.width && ny < state.height && fogged[ny * state.width + nx]) fogBorder[y * state.width + x] = 1;
+      if (!unknown(x, y)) continue;
+      const px = x - state.width / 2, pz = y - state.height / 2;
+      const offset = pickPositions.length / 3;
+      pickPositions.push(px, 0.15, pz, px + 1, 0.15, pz, px + 1, 0.15, pz + 1, px, 0.15, pz + 1);
+      pickIndices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
+      for (let sy = 0; sy < 2; sy++) for (let sx = 0; sx < 2; sx++) {
+        const cx = x * 2 + sx, cy = y * 2 + sy;
+        const a = corner(cx, cy), b = corner(cx + 1, cy), c = corner(cx + 1, cy + 1), d = corner(cx, cy + 1);
+        const peak = new Vector3(
+          a.x + 0.2 + cloudVariation(cx + 0.3, cy) * 0.1,
+          0.53 + cloudVariation(cx + 0.7, cy + 0.4) * 0.17,
+          a.z + 0.2 + cloudVariation(cx, cy + 0.6) * 0.1,
+        );
+        facet(a, peak, b);
+        facet(b, peak, c);
+        facet(c, peak, d);
+        facet(d, peak, a);
+        if (sy === 0 && !unknown(x, y - 1)) wall(b, a);
+        if (sx === 1 && !unknown(x + 1, y)) wall(c, b);
+        if (sy === 1 && !unknown(x, y + 1)) wall(d, c);
+        if (sx === 0 && !unknown(x - 1, y)) wall(a, d);
       }
     }
-    const textureWidth = Math.min(1024, state.width * 32);
-    const textureHeight = Math.min(1024, state.height * 32);
-    if (!cloudPixels || cloudPixels.width !== textureWidth || cloudPixels.height !== textureHeight) {
-      cloudTexture?.dispose();
-      cloudTexture = new DynamicTexture("fog clouds", { width: textureWidth, height: textureHeight }, scene, false);
-      cloudTexture.hasAlpha = true;
-      cloudPixels = new ImageData(textureWidth, textureHeight);
-      for (let py = 0; py < textureHeight; py++) for (let px = 0; px < textureWidth; px++) {
-        const x = (px + 0.5) * state.width / textureWidth;
-        const y = (py + 0.5) * state.height / textureHeight;
-        const cloud = fogNoise(x * 0.65, y * 0.65) * 0.6 + fogNoise(x * 1.4, y * 1.4) * 0.28 + fogNoise(x * 3.8, y * 3.8) * 0.12;
-        const offset = (py * textureWidth + px) * 4;
-        cloudPixels.data[offset] = 100 + cloud * 65;
-        cloudPixels.data[offset + 1] = 121 + cloud * 63;
-        cloudPixels.data[offset + 2] = 137 + cloud * 60;
-      }
-    }
-    for (let py = 0; py < textureHeight; py++) for (let px = 0; px < textureWidth; px++) {
-      const x = (px + 0.5) * state.width / textureWidth;
-      const y = (py + 0.5) * state.height / textureHeight;
-      const tx = Math.floor(x), ty = Math.floor(y);
-      const offset = (py * textureWidth + px) * 4;
-      if (fogged[ty * state.width + tx]) {
-        cloudPixels.data[offset + 3] = 255;
-        continue;
-      }
-      if (!fogBorder[ty * state.width + tx]) {
-        cloudPixels.data[offset + 3] = 0;
-        continue;
-      }
-      const billow = fogNoise(x * 1.4, y * 1.4);
-      let distance = 2;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const nx = tx + dx, ny = ty + dy;
-        if (nx < 0 || ny < 0 || nx >= state.width || ny >= state.height || !fogged[ny * state.width + nx]) continue;
-        const ex = Math.max(nx - x, 0, x - nx - 1);
-        const ey = Math.max(ny - y, 0, y - ny - 1);
-        distance = Math.min(distance, Math.hypot(ex, ey));
-      }
-      const fade = Math.max(0, 1 - distance / (0.32 + billow * 0.38));
-      const opacity = fade * fade * (3 - 2 * fade);
-      cloudPixels.data[offset + 3] = opacity * 255;
-    }
-    cloudTexture!.getContext().putImageData(cloudPixels, 0, 0);
-    cloudTexture!.update(false);
-    cloudFog.diffuseTexture = cloudTexture;
-    const clouds = solid(CreateGround("fog cloud canopy", { width: state.width, height: state.height }, scene), cloudFog, root, false);
-    clouds.position.y = 0.18;
+    if (!positions.length) return;
+    const clouds = new Mesh("faceted fog clouds", scene);
+    const cloudData = new VertexData();
+    cloudData.positions = positions; cloudData.indices = indices; cloudData.normals = normals; cloudData.colors = colors;
+    cloudData.applyToMesh(clouds);
+    solid(clouds, cloudFog, root, false);
     clouds.isPickable = false;
     clouds.freezeWorldMatrix();
     fogMeshes.push(clouds);
-    for (const mode of [TileVisibility.Unexplored]) {
-      const positions: number[] = [], indices: number[] = [];
-      for (let y = 0; y < state.height; y++) for (let x = 0; x < state.width; x++) {
-        const key = positionKey({ x, y });
-        if (visible.has(key) || (explored.has(key) ? TileVisibility.Explored : TileVisibility.Unexplored) !== mode) continue;
-        const px = x - (state.width - 1) / 2, pz = y - (state.height - 1) / 2;
-        const elevation = 0.15;
-        const offset = positions.length / 3;
-        positions.push(px - 0.5, elevation, pz - 0.5, px + 0.5, elevation, pz - 0.5, px + 0.5, elevation, pz + 0.5, px - 0.5, elevation, pz + 0.5);
-        indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
-      }
-      if (!positions.length) continue;
-      const mesh = new Mesh(mode, scene);
-      const data = new VertexData();
-      data.positions = positions; data.indices = indices; data.normals = [];
-      VertexData.ComputeNormals(positions, indices, data.normals);
-      data.applyToMesh(mesh);
-      solid(mesh, unexploredFog, root, false);
-      mesh.material!.backFaceCulling = false;
-      mesh.isPickable = mode === TileVisibility.Unexplored;
-      mesh.metadata = { fog: true };
-      mesh.freezeWorldMatrix();
-      fogMeshes.push(mesh);
-    }
+    const surface = new Mesh("unexplored fog surface", scene);
+    const pickData = new VertexData();
+    pickData.positions = pickPositions; pickData.indices = pickIndices; pickData.normals = [];
+    VertexData.ComputeNormals(pickPositions, pickIndices, pickData.normals);
+    pickData.applyToMesh(surface);
+    solid(surface, unexploredFog, root, false);
+    surface.isPickable = true;
+    surface.metadata = { fog: true };
+    surface.freezeWorldMatrix();
+    fogMeshes.push(surface);
   };
   const update = (state: GameState, selectedUnitId: string | null) => {
     const signature = JSON.stringify([state.width, state.height, state.perspectiveId, state.tiles.map(tile => [tile.x, tile.y, tile.terrain, getTileVisibility(state, state.perspectiveId!, tile)])]);
