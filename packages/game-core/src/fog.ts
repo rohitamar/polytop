@@ -1,5 +1,6 @@
 import { getTerritory, gridDistance, positionKey, type City, type GameAction, type GameState, type Position, type Tile, type TileTerritory, type Unit } from "./index";
 import { getUnitDefinition } from "./units";
+import { hasTechnology } from "./technologies";
 
 export enum TileVisibility {
   Unexplored = "unexplored",
@@ -36,7 +37,8 @@ export function computeVisibleTiles(state: GameState, playerId: string): Set<str
     for (const tile of tilesInRange(state, center, radius)) visible.add(positionKey(tile));
   };
   for (const unit of state.units) if (unit.ownerId === playerId) reveal(unit, getUnitDefinition(unit.unitType)?.visionRadius ?? visionRules.unitVisionRadius);
-  for (const city of state.cities) if (city.ownerId === playerId) reveal(city, visionRules.cityVisionRadius);
+  for (const city of state.cities) if (city.ownerId === playerId) reveal(city, visionRules.cityVisionRadius + Number(!!city.expanded));
+  for (const claim of getTerritory(state)) if (claim.playerId === playerId) visible.add(positionKey(claim));
   return visible;
 }
 
@@ -63,7 +65,10 @@ export function updatePlayerExploration(state: GameState): GameState {
     }
     for (const key of visible) {
       const tile = tileIndex.get(key);
-      if (tile) tiles[key] = { ...tile };
+      if (tile) {
+        const hidden = tile.resource === "wheat" && !hasTechnology(state, player.id, "organization") || tile.resource === "mine" && !hasTechnology(state, player.id, "climbing") || tile.resource === "starfish" && !hasTechnology(state, player.id, "fishing");
+        tiles[key] = { ...tile, ...(hidden ? { resource: undefined } : {}) };
+      }
       const city = cityIndex.get(key);
       if (city) cities[key] = { ...city };
       else delete cities[key];
@@ -100,6 +105,8 @@ export function getPlayerView(state: GameState, playerId: string): PlayerView {
   const visible = new Set(memory.visibleTiles);
   return {
     rules: state.rules ? structuredClone(state.rules) : undefined,
+    treaties: structuredClone(state.treaties ?? []),
+    peaceOffers: (state.peaceOffers ?? []).filter(offer => offer.from === playerId || offer.to === playerId).map(offer => ({ ...offer })),
     seed: "", width: state.width, height: state.height, revision: state.revision,
     activePlayerId: state.activePlayerId, turnNumber: state.turnNumber, perspectiveId: playerId,
     players: state.players.map(player => player.id === playerId ? { ...player, resources: { ...player.resources }, technologies: [...player.technologies] } : { id: player.id, name: player.name, resources: { gold: 0 }, technologies: [] }),

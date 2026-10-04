@@ -1005,3 +1005,16 @@ button:disabled { cursor: default; }
 @media (max-width: 700px) {
   .unit-info { left: 12px; bottom: 80px; max-width: 220px; padding: 10px; }
 }
+
+.development-panel { max-height: calc(100dvh - 170px); overflow-y: auto; }
+.development-action { display: grid; gap: 4px; margin: 10px 0; }
+.development-action small { color: #756b59; }
+.peace-panel { position: absolute; top: 160px; left: 24px; width: 230px; padding: 12px; background: #f8f4e9; border: 1px solid #c8cfbe; border-radius: 12px; z-index: 8; }
+.peace-panel div { display: grid; gap: 5px; margin: 10px 0; }
+.unit-info button { margin: 4px 0; }
+
+.unit-info > strong { display: block; margin-bottom: 8px; }
+.unit-info button { border: 1px solid #becaba; border-radius: 5px; padding: 6px 9px; background: #f3f5eb; color: #344f50; font: inherit; cursor: pointer; }
+.unit-info button:disabled { opacity: 0.55; cursor: default; }
+.unit-info small { display: block; }
+@media (max-width: 700px) { .peace-panel { left: 12px; top: 140px; width: 210px; } }

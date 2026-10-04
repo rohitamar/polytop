@@ -4,15 +4,15 @@ import { applyAction, createGame as generateGame, getTerritory, getTileTerritory
 const createGame = (seed = "fern-104", count = 2) => generateGame(seed, count, count === 2 ? { scenario: "demo" } : {});
 
 describe("city territory", () => {
-  it("claims its own tile and a compact Manhattan region, leaving distant tiles unclaimed", () => {
+  it("claims its own tile and a compact square region, leaving distant tiles unclaimed", () => {
     const state = createGame();
     state.cities = [state.cities[0]];
-    expect(getTerritory(state).filter(tile => tile.cityId)).toHaveLength(13);
+    expect(getTerritory(state).filter(tile => tile.cityId)).toHaveLength(9);
     expect(getTileTerritory(state, 4, 5)).toMatchObject({ cityId: "city-1", playerId: "player-1" });
-    expect(getTileTerritory(state, 6, 5)?.cityId).toBe("city-1");
+    expect(getTileTerritory(state, 5, 5)?.cityId).toBe("city-1");
     expect(getTileTerritory(state, 6, 6)?.cityId).toBeNull();
     expect(getTerritory(state, 0).filter(tile => tile.cityId)).toHaveLength(1);
-    expect(territoryRules.radius).toBe(2);
+    expect(territoryRules.radius).toBe(1);
     expect(() => getTerritory(state, -1)).toThrow();
   });
   it("resolves overlaps by distance then stable city ID regardless of array order", () => {
@@ -58,8 +58,9 @@ describe("city territory", () => {
     const state = createGame();
     state.cities = [{ ...state.cities[0], x: 0, y: 0 }];
     state.players[0].resources.gold = 10;
-    expect(getTerritory(state).filter(tile => tile.cityId)).toHaveLength(6);
-    const next = applyAction(state, { type: "UPGRADE_TOWN_HALL", playerId: "player-1", cityId: "city-1" });
+    expect(getTerritory(state).filter(tile => tile.cityId)).toHaveLength(4);
+    state.cities[0] = { ...state.cities[0], townHallLevel: 2, population: 2, rewardPending: true };
+    const next = applyAction(state, { type: "CHOOSE_CITY_REWARD", playerId: "player-1", cityId: "city-1", reward: "workshop" });
     expect(getTerritory(next)).toEqual(getTerritory(state));
   });
   it.each([2, 3, 8])("derives every city owner for %i players deterministically", count => {

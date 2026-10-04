@@ -97,3 +97,20 @@ it("accepts city rewards while rejecting forged ability and action state", () =>
     expect(parseLobbyClientMessage({ ...envelope, action: { ...move, ...extra } })).toBeNull();
   }
 });
+
+it.each([
+  { type: "HARVEST_RESOURCE", to: { x: 4, y: 4 } },
+  { type: "BUILD_IMPROVEMENT", to: { x: 4, y: 4 }, improvement: "farm" },
+  { type: "CLEAR_FOREST", to: { x: 4, y: 4 } },
+  { type: "BUILD_BRIDGE", to: { x: 4, y: 4 } },
+  { type: "CHOOSE_CITY_REWARD", cityId: "city-1", reward: "giant" },
+  { type: "UPGRADE_NAVAL", unitId: "raft-1", unitType: "scout" },
+  { type: "HARVEST_STARFISH", unitId: "scout-1" },
+  { type: "PROPOSE_PEACE", otherPlayerId: "player-2" },
+  { type: "ACCEPT_PEACE", otherPlayerId: "player-2" },
+  { type: "BREAK_PEACE", otherPlayerId: "player-2" },
+])("accepts development intent $type without client economy, rewards or identity", action => {
+  const envelope = { type: "GAME_ACTION", requestId: "development", expectedRevision: 0 };
+  expect(parseLobbyClientMessage({ ...envelope, action })).toEqual({ ...envelope, action });
+  for (const override of [{ gold: 100 }, { population: 50 }, { playerId: "other" }, { hp: 40 }]) expect(parseLobbyClientMessage({ ...envelope, action: { ...action, ...override } })).toBeNull();
+});

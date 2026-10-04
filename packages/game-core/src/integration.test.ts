@@ -21,8 +21,8 @@ describe("playtest integration baseline", () => {
     ["warrior", 2, 1, 10, 2, 2, 1, 1, null],
     ["archer", 3, 1, 10, 2, 1, 1, 2, "archery"],
     ["rider", 3, 1, 10, 2, 1, 2, 1, "riding"],
-    ["swordsman", 5, 2, 15, 3, 3, 1, 1, "smithery"],
-    ["sailor", 5, 1, 10, 2, 1, 3, 2, "sailing"],
+    ["swordsman", 5, 1, 15, 3, 3, 1, 1, "smithery"],
+    ["scout", 5, 1, 10, 2, 1, 3, 2, "sailing"],
   ] as const)("defines %s stats and unlock centrally", (id, goldCost, populationCost, maxHp, attack, defense, maxMovement, range, requiredTechnology) => {
     expect(getUnitDefinition(id)).toMatchObject({ goldCost, populationCost, maxHp, attack, defense, maxMovement, range, requiredTechnology });
   });
@@ -113,7 +113,7 @@ describe("playtest integration baseline", () => {
     expect(getReachableTiles(state, "warrior-1").find(tile => tile.x === 4 && tile.y === 2)?.cost).toBe(0.5);
   });
 
-  it("embarks an existing unit, traverses enemy water and collects Fish once", () => {
+  it("embarks an existing unit, traverses enemy water without automatically harvesting Fish", () => {
     let state = fixture();
     state.units = state.units.filter(unit => !unit.id.startsWith("observer-"));
     state.cities[0].x = 6;
@@ -123,15 +123,15 @@ describe("playtest integration baseline", () => {
     state = applyAction(state, { type: "BUILD_PORT", playerId: "player-1", to: { x: 6, y: 1 } });
     expect(state.players[0].resources.gold).toBe(43);
     state = applyAction(state, { type: "move", playerId: "player-1", unitId: "warrior-1", to: { x: 6, y: 1 } });
-    expect(state.units[0]).toMatchObject({ unitType: "rider", embarked: true, movement: 0, maxMovement: 2 });
+    expect(state.units[0]).toMatchObject({ unitType: "raft", carriedUnitType: "rider", embarked: true, movement: 0, maxMovement: 2 });
     expect(getPlayerPopulation(state, "player-1").used).toBe(1);
     state = end(end(state));
     state = applyAction(state, { type: "move", playerId: "player-1", unitId: "warrior-1", to: { x: 8, y: 1 } });
     state = end(end(state));
     const gold = state.players[0].resources.gold;
     state = applyAction(state, { type: "move", playerId: "player-1", unitId: "warrior-1", to: { x: 9, y: 1 } });
-    expect(state.players[0].resources.gold).toBe(gold + 2);
-    expect(getTile(state, 9, 1)?.resource).toBeUndefined();
+    expect(state.players[0].resources.gold).toBe(gold);
+    expect(getTile(state, 9, 1)?.resource).toBe("fishery");
     expect(JSON.parse(JSON.stringify(state))).toEqual(state);
   });
 });

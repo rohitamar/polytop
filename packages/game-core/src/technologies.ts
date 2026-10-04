@@ -1,9 +1,8 @@
-import type { GameState, Opportunity } from "./index";
+import type { GameState } from "./index";
 
 export type TechEffect =
   | { type: "unlock-unit"; description: string }
-  | { type: "capability"; description: string }
-  | { type: "collect-resource"; resource: Opportunity; description: string };
+  | { type: "capability"; description: string };
 
 export type TechnologyDefinition = {
   id: TechnologyId;
@@ -15,26 +14,22 @@ export type TechnologyDefinition = {
 };
 
 export const technologies = [
-  { id: "organization", name: "Organization", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Opens the Farming and Strategy branches." }], implemented: true },
-  { id: "farming", name: "Farming", tier: 1, prerequisites: ["organization"], effects: [{ type: "capability", description: "Future farming improvements." }], implemented: false },
-  { id: "construction", name: "Construction", tier: 3, prerequisites: ["farming"], effects: [{ type: "capability", description: "Future construction improvements." }], implemented: false },
-  { id: "strategy", name: "Strategy", tier: 2, prerequisites: ["organization"], effects: [{ type: "capability", description: "Defender recruitment." }], implemented: true },
-  { id: "diplomacy", name: "Diplomacy", tier: 3, prerequisites: ["strategy"], effects: [{ type: "capability", description: "Future diplomatic capabilities." }], implemented: false },
-  { id: "hunting", name: "Hunting", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Opens the Forestry and Archery branches." }], implemented: true },
-  { id: "forestry", name: "Forestry", tier: 2, prerequisites: ["hunting"], effects: [{ type: "capability", description: "Opens the Mathematics branch." }], implemented: true },
-  { id: "mathematics", name: "Mathematics", tier: 3, prerequisites: ["forestry"], effects: [{ type: "unlock-unit", description: "Catapult recruitment." }], implemented: true },
-  { id: "archery", name: "Archery", tier: 2, prerequisites: ["hunting"], effects: [{ type: "unlock-unit", description: "Archer recruitment." }], implemented: true },
-  { id: "spiritualism", name: "Spiritualism", tier: 3, prerequisites: ["archery"], effects: [{ type: "capability", description: "Future spiritual capabilities." }], implemented: false },
-  { id: "fishing", name: "Fishing", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Build Ports for 7 Gold on owned coastal Water. Move land units onto Ports to embark as Rafts." }], implemented: true },
-  { id: "sailing", name: "Sailing", tier: 2, prerequisites: ["fishing"], effects: [{ type: "unlock-unit", description: "Future naval upgrades and Scout recruitment." }], implemented: false },
-  { id: "navigation", name: "Navigation", tier: 3, prerequisites: ["sailing"], effects: [{ type: "unlock-unit", description: "Bomber (coming soon)." }], implemented: false },
-  { id: "ramming", name: "Ramming", tier: 2, prerequisites: ["fishing"], effects: [{ type: "unlock-unit", description: "Rammer (coming soon)." }], implemented: false },
-  { id: "aquatism", name: "Aquatism", tier: 3, prerequisites: ["ramming"], effects: [{ type: "capability", description: "Future aquatic capabilities." }], implemented: false },
-  { id: "climbing", name: "Climbing", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Allows land units to enter Mountains." }], implemented: true },
-  { id: "mining", name: "Mining", tier: 2, prerequisites: ["climbing"], effects: [{ type: "collect-resource", resource: "mine", description: "Collect mineral deposits for Gold, including deposits beneath existing units." }], implemented: true },
+  { id: "organization", name: "Organization", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Harvest fruit for 2 Gold and 1 population; reveals crops." }], implemented: true },
+  { id: "farming", name: "Farming", tier: 2, prerequisites: ["organization"], effects: [{ type: "capability", description: "Build Farms on crops for 5 Gold and 2 population." }], implemented: true },
+  { id: "strategy", name: "Strategy", tier: 2, prerequisites: ["organization"], effects: [{ type: "capability", description: "Recruit Defenders and propose peace treaties." }], implemented: true },
+  { id: "hunting", name: "Hunting", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Hunt animals for 2 Gold and 1 population." }], implemented: true },
+  { id: "forestry", name: "Forestry", tier: 2, prerequisites: ["hunting"], effects: [{ type: "capability", description: "Build Lumber Huts for 3 Gold and 1 population; clear forests for 1 Gold." }], implemented: true },
+  { id: "mathematics", name: "Mathematics", tier: 3, prerequisites: ["forestry"], effects: [{ type: "unlock-unit", description: "Recruit Catapults; build Sawmills for 5 Gold and 1 population per adjacent Lumber Hut." }], implemented: true },
+  { id: "archery", name: "Archery", tier: 2, prerequisites: ["hunting"], effects: [{ type: "unlock-unit", description: "Recruit Archers; units receive a defense bonus in forests." }], implemented: true },
+  { id: "fishing", name: "Fishing", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Harvest fish for 2 Gold and 1 population; reveal Starfish. Build Ports for 7 Gold and 1 population; embark as Rafts." }], implemented: true },
+  { id: "sailing", name: "Sailing", tier: 2, prerequisites: ["fishing"], effects: [{ type: "unlock-unit", description: "Upgrade Rafts into Scouts for 5 Gold; travel on deep ocean." }], implemented: true },
+  { id: "navigation", name: "Navigation", tier: 3, prerequisites: ["sailing"], effects: [{ type: "unlock-unit", description: "Upgrade Rafts into Bombers for 15 Gold; harvest Starfish for 8 Gold." }], implemented: true },
+  { id: "ramming", name: "Ramming", tier: 2, prerequisites: ["fishing"], effects: [{ type: "unlock-unit", description: "Upgrade Rafts into Rammers for 5 Gold." }], implemented: true },
+  { id: "climbing", name: "Climbing", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Enter Mountains, receive a mountain defense bonus, and reveal metal." }], implemented: true },
+  { id: "mining", name: "Mining", tier: 2, prerequisites: ["climbing"], effects: [{ type: "capability", description: "Build Mines on metal for 5 Gold and 2 population." }], implemented: true },
   { id: "riding", name: "Riding", tier: 1, prerequisites: [], effects: [{ type: "unlock-unit", description: "Rider recruitment." }], implemented: true },
-  { id: "roads", name: "Roads", tier: 2, prerequisites: [], effects: [{ type: "capability", description: "Build Roads for 3 Gold per tile. Connected roads cost 0.5 movement." }], implemented: true },
-  { id: "smithery", name: "Smithery", tier: 3, prerequisites: [], effects: [{ type: "unlock-unit", description: "Swordsman recruitment." }], implemented: true },
+  { id: "roads", name: "Roads", tier: 2, prerequisites: ["riding"], effects: [{ type: "capability", description: "Build Roads for 3 Gold per tile. Connected roads cost 0.5 movement. Build Bridges for 5 Gold; connect cities for population." }], implemented: true },
+  { id: "smithery", name: "Smithery", tier: 3, prerequisites: ["mining"], effects: [{ type: "unlock-unit", description: "Recruit Swordsmen; build Forges for 5 Gold and 2 population per adjacent Mine." }], implemented: true },
 ] as const;
 
 export type TechnologyId = (typeof technologies)[number]["id"];

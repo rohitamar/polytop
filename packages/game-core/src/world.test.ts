@@ -37,7 +37,7 @@ describe("strategic worlds", () => {
         expect(city).toMatchObject({ x: unit.x, y: unit.y, ownerId: unit.ownerId });
         const near = state.tiles.filter(tile => Math.abs(tile.x - city.x) + Math.abs(tile.y - city.y) <= terrainRules.safeRadius);
         expect(near).toHaveLength(13);
-        expect(near.some(tile => tile.terrain === "water" && getTerritory(state).find(claim => positionKey(claim) === positionKey(tile))?.playerId === unit.ownerId)).toBe(true);
+        expect(near.some(tile => tile.terrain === "water")).toBe(true);
         expect(near.filter(tile => Math.abs(tile.x - city.x) + Math.abs(tile.y - city.y) <= 1).every(tile => canUnitEnterTerrain(state, state.units[0].ownerId, state.units[0], tile.terrain))).toBe(true);
         expect(getTerritory(state).find(tile => tile.x === city.x && tile.y === city.y)).toMatchObject({ cityId: city.id, playerId: city.ownerId });
         for (const other of state.units.filter(other => other.id !== unit.id)) expect(Math.abs(unit.x - other.x) + Math.abs(unit.y - other.y)).toBeGreaterThanOrEqual(6);
@@ -59,13 +59,13 @@ describe("strategic worlds", () => {
     for (let seed = 0; seed < 30; seed++) {
       const state = createGame(String(seed), count);
       for (const terrain of ["water", "forest", "mountain"] as const) {
-        expect(state.tiles.filter(tile => tile.terrain === terrain)).toHaveLength(Math.round(state.tiles.length * 0.1333));
+        expect(state.tiles.filter(tile => (tile.terrain === terrain || terrain === "water" && tile.terrain === "ocean"))).toHaveLength(Math.round(state.tiles.length * 0.1333));
       }
     }
   });
   it("uses the same terrain proportions in the local demo and rectangular worlds", () => {
     for (const state of [createGame("fern-104", 2, { scenario: "demo" }), createGame("fern-104", 8, { width: 32, height: 18 })]) {
-      for (const terrain of ["water", "forest", "mountain"] as const) expect(state.tiles.filter(tile => tile.terrain === terrain)).toHaveLength(Math.round(state.tiles.length * 0.1333));
+      for (const terrain of ["water", "forest", "mountain"] as const) expect(state.tiles.filter(tile => (tile.terrain === terrain || terrain === "water" && tile.terrain === "ocean"))).toHaveLength(Math.round(state.tiles.length * 0.1333));
     }
   });
   it("preserves wooded start neighborhoods instead of clearing identical grass diamonds", () => {
@@ -88,7 +88,7 @@ describe("strategic worlds", () => {
         const forests = state.tiles.filter(tile => tile.terrain === "forest");
         const isolated = forests.filter(tile => [[0, -1], [1, 0], [0, 1], [-1, 0]].every(([dx, dy]) => getTile(state, tile.x + dx, tile.y + dy)?.terrain !== "forest"));
         expect(isolated.length / forests.length).toBeGreaterThan(0.85);
-        expect(forests.every(tile => tile.resource === "forest")).toBe(true);
+        expect(forests.every(tile => (!tile.resource || tile.resource === "animal"))).toBe(true);
         for (const [left, top] of [[true, true], [false, true], [true, false], [false, false]]) {
           expect(forests.some(tile => (tile.x < state.width / 2) === left && (tile.y < state.height / 2) === top)).toBe(true);
         }
@@ -99,7 +99,7 @@ describe("strategic worlds", () => {
   it("keeps water in neighboring regions", () => {
     const state = createGame("fern-104", 8);
     for (const terrain of ["water"] as const) {
-      const tiles = state.tiles.filter(tile => tile.terrain === terrain);
+      const tiles = state.tiles.filter(tile => (tile.terrain === terrain || terrain === "water" && tile.terrain === "ocean"));
       expect(tiles.length).toBeGreaterThan(20);
       const clustered = tiles.filter(tile => [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([dx, dy]) => getTile(state, tile.x + dx, tile.y + dy)?.terrain === terrain));
       expect(clustered.length / tiles.length).toBeGreaterThan(0.85);

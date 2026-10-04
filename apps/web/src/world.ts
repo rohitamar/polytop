@@ -36,6 +36,7 @@ import {
   getPortBuildingReason,
   getTerritory,
   getTile,
+  isWater,
   getReachableTiles,
   getAttackTargets,
   type CombatPreview,
@@ -166,6 +167,7 @@ export function createWorld(
     material("moss", "#91a76c"),
   ];
   const water = material("lagoon", "#60a6ae");
+  const ocean = material("deep ocean", "#3d7f98");
   const earth = material("earth", "#657b68");
   const bark = material("cedar", "#796348");
   const leaves = [
@@ -233,7 +235,7 @@ export function createWorld(
   let combatAnimating = false;
   const ownerRings = new Map<string, Mesh>();
   const tileHeight = (tile?: Tile) =>
-    tile?.terrain === "water" ? -0.12 : 0.13;
+    isWater(tile?.terrain ?? "grass") ? -0.12 : 0.13;
   const tilePoint = (p: Position, surface = false) =>
     new Vector3(
       p.x - (currentState.width - 1) / 2,
@@ -354,17 +356,23 @@ export function createWorld(
       mount.position.set(0, 0.3, 0.05);
       const head = box("mount head", 0.19, 0.3, 0.26, bark, warrior);
       head.position.set(0, 0.42, -0.36);
-    } else if (unit.unitType === "sailor") {
-      shield.setEnabled(false);
-      emblem.setEnabled(false);
-      blade.setEnabled(false);
-      guard.setEnabled(false);
-      const hull = box("sailor hull", 0.65, 0.23, 0.90, bark, warrior);
-      hull.position.y = 0.08;
-      const mast = box("sailor mast", 0.035, 1.2, 0.035, bark, warrior);
-      mast.position.set(0, 0.68, 0.27);
-      const sail = box("sailor sail", 0.50, 0.52, 0.025, cloak, warrior);
-      sail.position.set(0.20, 0.96, 0.27);
+    } else if (unit.embarked) {
+      for (const mesh of warrior.getChildMeshes()) mesh.setEnabled(false);
+      const hull = box("ship hull", unit.unitType === "juggernaut" ? 0.9 : 0.65, 0.23, 0.9, bark, warrior);
+      hull.position.y = 0.14;
+      if (unit.unitType === "scout") {
+        box("ship mast", 0.045, 1.1, 0.045, bark, warrior).position.y = 0.7;
+        box("ship sail", 0.55, 0.55, 0.035, cloak, warrior).position.set(0.2, 0.8, 0);
+      } else if (unit.unitType === "rammer") {
+        box("ramming prow", 0.18, 0.16, 0.45, gold, warrior).position.set(0, 0.15, -0.5);
+        box("rammer deck", 0.5, 0.18, 0.5, armor, warrior).position.y = 0.35;
+      } else if (unit.unitType === "bomber") {
+        box("bomber cannon", 0.18, 0.18, 0.65, dark, warrior).position.set(0, 0.42, -0.12);
+        box("bomber base", 0.38, 0.18, 0.38, armor, warrior).position.y = 0.3;
+      } else if (unit.unitType === "juggernaut") {
+        box("juggernaut tower", 0.6, 0.6, 0.6, armor, warrior).position.y = 0.6;
+        box("juggernaut banner", 0.4, 0.3, 0.04, cloak, warrior).position.y = 1.05;
+      } else box("raft passenger", 0.22, 0.4, 0.22, cloak, warrior).position.y = 0.4;
     } else if (unit.unitType === "defender") {
       shield.scaling.set(1.8, 1.8, 1.8);
       blade.setEnabled(false);
@@ -437,6 +445,7 @@ export function createWorld(
     label.position.y = 1.45;
     label.billboardMode = Mesh.BILLBOARDMODE_ALL;
     healthLabels.set(unit.id, labelTexture);
+    warrior.metadata = { unitType: unit.unitType };
     warriors.set(unit.id, warrior);
     warrior.position.copyFrom(tilePoint(unit, true));
     shadowDirty = true;
@@ -537,13 +546,13 @@ export function createWorld(
       const terrain = box(
         `tile-${tile.x}-${tile.y}`,
         0.975,
-        tile.terrain === "water" ? 0.15 : 0.4,
+        isWater(tile.terrain) ? 0.15 : 0.4,
         0.975,
-        tile.terrain === "water" ? water : grass[(tile.x * 3 + tile.y * 7) % 3],
+        tile.terrain === "ocean" ? ocean : tile.terrain === "water" ? water : grass[(tile.x * 3 + tile.y * 7) % 3],
       );
       terrain.position.set(
         point.x,
-        point.y - (tile.terrain === "water" ? 0.075 : 0.2),
+        point.y - (isWater(tile.terrain) ? 0.075 : 0.2),
         point.z,
       );
       terrain.isPickable = true;
@@ -584,7 +593,7 @@ export function createWorld(
         cap.isPickable = true;
         cap.metadata = { tile };
       }
-      if (tile.terrain === "water" && !rememberedModel) {
+      if (isWater(tile.terrain) && !rememberedModel) {
         for (let i = 0; i < 2; i++) {
           const ripple = box("ripple", 0.18 + i * 0.12, 0.007, 0.018, foam);
           ripples.push(ripple as Mesh);
@@ -676,10 +685,10 @@ export function createWorld(
   const roadMeshes = new Map<string, { node: TransformNode; signature: string }>();
   const updateRoads = (state: GameState) => {
     for (const [key, model] of roadMeshes) {
-      if (!state.tiles.some(tile => positionKey(tile) === key && tile.road)) { model.node.dispose(); roadMeshes.delete(key); }
+      if (!state.tiles.some(tile => positionKey(tile) === key && (tile.road || tile.bridge))) { model.node.dispose(); roadMeshes.delete(key); }
     }
     const connected = (x: number, y: number) => isRoadConnected(state, { x, y });
-    for (const tile of state.tiles.filter(tile => tile.road)) {
+    for (const tile of state.tiles.filter(tile => (tile.road || tile.bridge))) {
       const edges = [[0, -1], [1, 0], [0, 1], [-1, 0]].filter(([dx, dy]) => connected(tile.x + dx, tile.y + dy));
       const key = positionKey(tile);
       const signature = `${getTileVisibility(state, state.perspectiveId!, tile)}:${state.width}:${state.height}:${edges.map(edge => edge.join(",")).join(";")}`;
@@ -858,7 +867,7 @@ export function createWorld(
     resourceLayer.select(state, selectedCity, selectedResource);
     selected = selectedUnitId;
     for (const city of state.cities) {
-      const signature = `${city.ownerId}:${city.townHallLevel}:${getTileVisibility(state, state.perspectiveId!, city)}`;
+      const signature = `${city.ownerId}:${city.townHallLevel}:${city.walls}:${getTileVisibility(state, state.perspectiveId!, city)}`;
       if (cityModels.get(city.id)?.signature === signature) continue;
       cityModels.get(city.id)?.node.dispose();
       rememberedModel = getTileVisibility(state, state.perspectiveId!, city) === TileVisibility.Explored;
@@ -870,7 +879,7 @@ export function createWorld(
       const roof = index < 0 ? neutral : accents[index];
       const plaza = box("city plaza", 0.88, 0.06, 0.88, snow, node);
       plaza.position.y = 0.03;
-      const level = city.townHallLevel;
+      const level = Math.min(3, city.townHallLevel);
       const hallMaterial = level === 1 ? bark : armor;
       const hallWidth = level === 1 ? 0.42 : 0.5;
       const hallHeight = level === 1 ? 0.32 : level === 2 ? 0.5 : 0.62;
@@ -910,6 +919,7 @@ export function createWorld(
       pole.position.set(0.32, 0.06 + poleHeight / 2, -0.25);
       const flag = box("town center banner", 0.22, 0.16, 0.025, roof, node);
       flag.position.set(0.23, poleHeight - 0.01, -0.25);
+      if (city.walls) for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) box("city wall", dx ? 0.08 : 0.9, 0.25, dz ? 0.08 : 0.9, armor, node).position.set(dx * 0.45, 0.15, dz * 0.45);
       for (const mesh of node.getChildMeshes()) {
         mesh.isPickable = true;
         mesh.metadata = {
@@ -922,6 +932,7 @@ export function createWorld(
       rememberedModel = false;
     }
     for (const unit of renderedUnits) {
+      if (warriors.get(unit.id)?.metadata?.unitType !== unit.unitType) { warriors.get(unit.id)?.dispose(); warriors.delete(unit.id); healthLabels.get(unit.id)?.dispose(); healthLabels.delete(unit.id); healthValues.delete(unit.id); }
       if (!warriors.has(unit.id)) createWarrior(unit, state.players.findIndex(player => player.id === unit.ownerId));
       const remembered = rememberedUnitIds.has(unit.id);
       for (const mesh of warriors.get(unit.id)!.getChildMeshes()) {

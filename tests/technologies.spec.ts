@@ -37,16 +37,16 @@ test("modal research validates prerequisites, synchronizes multiplayer and survi
       await expect(modal(client)).toBeVisible();
       const connectors = client.locator(".technology-tree svg");
       expect((await connectors.boundingBox())!.width).toBeGreaterThan(800);
-      await expect(connectors.locator("line")).toHaveCount(13);
+      await expect(connectors.locator("line")).toHaveCount(11);
       await expect(node(client, "Archery")).toHaveAccessibleName("Archery: Locked");
-      await expect(node(client, "Sailing")).toHaveAccessibleName("Sailing: Coming Soon");
+      await expect(node(client, "Sailing")).toHaveAccessibleName("Sailing: Locked");
       await node(client, "Archery").click();
       await expect(details(client)).toContainText(client === page ? "Requires Hunting" : "Not your turn");
       await expect(client.getByRole("button", { name: "Research Archery" })).toBeDisabled();
       await node(client, "Farming").click();
-      await expect(node(client, "Farming")).toHaveAccessibleName("Farming: Coming Soon");
-      await expect(details(client)).toContainText("not implemented yet");
-      await expect(client.getByRole("button", { name: "Research Farming" })).toHaveCount(0);
+      await expect(node(client, "Farming")).toHaveAccessibleName("Farming: Locked");
+      await expect(details(client)).toContainText(client === page ? "Requires Organization" : "Not your turn");
+      await expect(client.getByRole("button", { name: "Research Farming" })).toBeDisabled();
       await client.getByRole("button", { name: "Close technologies" }).click();
       expect(await snapshot(client)).toEqual(before);
     }
@@ -71,10 +71,10 @@ test("modal research validates prerequisites, synchronizes multiplayer and survi
     await synced(before.revision + 2);
     await expect(details(page)).toContainText("Already researched");
     await expect(page.getByRole("button", { name: "Research Archery" })).toHaveCount(0);
-    await expect(node(page, "Spiritualism")).toHaveAccessibleName("Spiritualism: Coming Soon");
+    for (const removed of ["Aquatism", "Construction", "Diplomacy", "Spiritualism"]) await expect(node(page, removed)).toHaveCount(0);
     await research(page, "Fishing");
     await synced(before.revision + 3);
-    await expect(node(page, "Sailing")).toHaveAccessibleName("Sailing: Coming Soon");
+    await expect(node(page, "Sailing")).toHaveAccessibleName("Sailing: Locked");
     const saved = await snapshot(page);
     expect(saved.players[0].technologies).toEqual(["hunting", "archery", "fishing"]);
     expect(saved.players[0].resources.gold).toBe(before.players[0].resources.gold - 16);
@@ -85,7 +85,7 @@ test("modal research validates prerequisites, synchronizes multiplayer and survi
     expect(await snapshot(page)).toEqual(saved);
     await page.getByRole("button", { name: "Technologies", exact: true }).click();
     await expect(node(page, "Archery")).toHaveAccessibleName("Archery: Researched");
-    await expect(node(page, "Sailing")).toHaveAccessibleName("Sailing: Coming Soon");
+    await expect(node(page, "Sailing")).toHaveAccessibleName("Sailing: Locked");
     await page.getByRole("button", { name: "Close technologies" }).click();
     await page.getByRole("button", { name: "End Turn", exact: true }).click();
     await synced(saved.revision + 1);
@@ -93,7 +93,7 @@ test("modal research validates prerequisites, synchronizes multiplayer and survi
     await research(guest, "Fishing");
     await synced(saved.revision + 2);
     expect((await snapshot(guest)).players[1].technologies).toEqual(["fishing"]);
-    await expect(node(guest, "Sailing")).toHaveAccessibleName("Sailing: Coming Soon");
+    await expect(node(guest, "Sailing")).toHaveAccessibleName("Sailing: Available");
     await guest.screenshot({ path: testInfo.outputPath("technology-tree-guest.png") });
   } finally { await context.close(); }
 });
@@ -113,10 +113,10 @@ test("modal contains focus, scrolls on mobile and closes without changing board 
   await node(page, "Archery").click();
   await expect(details(page)).toContainText("Requires Hunting");
   await node(page, "Navigation").click();
-  await expect(details(page)).toContainText("Coming Soon");
-  await expect(page.getByRole("button", { name: "Research Navigation" })).toHaveCount(0);
+  await expect(details(page)).toContainText("Requires Sailing");
+  await expect(page.getByRole("button", { name: "Research Navigation" })).toBeDisabled();
   await node(page, "Hunting").click();
-  await expect(details(page)).toContainText("Not enough Gold");
+  await expect(details(page)).toContainText("Available");
   await page.screenshot({ path: testInfo.outputPath("technology-tree-mobile.png") });
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement?.closest("dialog") !== null)).toBe(true);

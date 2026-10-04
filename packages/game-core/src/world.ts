@@ -246,6 +246,7 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   const existingForest = tiles.filter(tile => tile.terrain === "forest");
   for (const tile of existingForest.slice(forestTarget)) tile.terrain = "grass";
   scatterForests(seed + ":forest-balance", tiles, width, height, forestTarget, centers);
+  for (const tile of tiles.filter(tile => tile.terrain === "water")) if (!tiles.some(other => other.terrain !== "water" && other.terrain !== "ocean" && Math.max(Math.abs(other.x - tile.x), Math.abs(other.y - tile.y)) <= 1)) tile.terrain = "ocean";
   return { width, height, starts, villages, tiles };
 }
 
@@ -259,8 +260,9 @@ export function placeResources(seed: string, tiles: Tile[], width: number, heigh
       const x = tile.x + dx, y = tile.y + dy;
       return x < 0 || y < 0 || x >= width || y >= height ? [] : [tiles[y * width + x]];
     });
-    if (tile.terrain === "forest") tile.resource = "forest";
+    if (tile.terrain === "forest" && roll < 0.5) tile.resource = "animal";
     else if (tile.terrain === "mountain") tile.resource = "mine";
+    else if (tile.terrain === "ocean" && roll < 0.08) tile.resource = "starfish";
     else if (tile.terrain === "water" && near.some(other => other.terrain !== "water") && roll < resourceRules.fishChance) tile.resource = "fishery";
     else if (tile.terrain === "grass" && roll < resourceRules.grassChance) {
       tile.resource = kind < resourceRules.fruitShare ? "orchard" : "wheat";

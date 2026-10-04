@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { getPortBuildingReason, getReachableTiles, getTile, type Position } from "../packages/game-core/src/index";
 import "../apps/web/src/debug";
+import { travel } from "./development-helpers";
 
 const snapshot = (page: Page) => page.evaluate(() => window.__GAME_DEBUG__!.getState());
 async function tile(page: Page, position: Position) {
@@ -14,11 +15,12 @@ async function round(page: Page) {
   }
 }
 
-test("starting territory provides highlighted Port sites and permits embarkation without capturing a city", async ({ page }, testInfo) => {
+test("coastal territory provides highlighted Port sites and permits embarkation", async ({ page }, testInfo) => {
   await page.goto("/");
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
   const initial = await snapshot(page);
-  const home = initial.cities.find(city => city.id === initial.units[0].homeCityId)!;
+  const home = { x: 10, y: 7 };
+  await travel(page, "warrior-1", home);
   for (let i = 0; i < 5; i++) await round(page);
   await page.getByRole("button", { name: "Technologies", exact: true }).click();
   await page.getByRole("button", { name: /^Fishing: / }).click();
@@ -56,6 +58,6 @@ test("starting territory provides highlighted Port sites and permits embarkation
   }
   state = await snapshot(page);
   expect(state.units[0]).toMatchObject({ embarked: true, x: site.x, y: site.y });
-  expect(state.cities.filter(city => city.ownerId === initial.players[0].id)).toHaveLength(1);
+  expect(state.cities.filter(city => city.ownerId === initial.players[0].id).length).toBeGreaterThanOrEqual(2);
   await page.screenshot({ path: testInfo.outputPath("starting-coast-embarked.png") });
 });

@@ -56,10 +56,11 @@ describe("technologies", () => {
     const to = getReachableTiles(state, "warrior-1")[0];
     state = applyAction(state, { type: "move", playerId: "player-1", unitId: "warrior-1", to });
     state = end(state);
-    state.players[1].resources.gold = 10;
+    state.players[1].resources.gold = 15;
+    state = unlock(state, "riding");
     state = unlock(state, "roads");
     state = end(state);
-    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["roads"]]);
+    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["riding", "roads"]]);
     expect(state.units[0].movement).toBe(state.units[0].maxMovement);
     expect(hasTechnology(JSON.parse(JSON.stringify(state)), "player-1", "archery")).toBe(true);
   });

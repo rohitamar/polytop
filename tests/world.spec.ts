@@ -122,7 +122,7 @@ test("eight-player 30x30 match sanitizes terrain, captures territory and renders
     await page.getByRole("button", { name: "Inspect resources", exact: true }).click();
     const resource = state.tiles.find(tile => tile.resource && after.some(claim => positionKey(claim) === positionKey(tile) && claim.cityId === target.id))!;
     await clickTile(page, resource.x, resource.y);
-    await expect(page.getByRole("region", { name: "Resource tile", exact: true })).toContainText("Gold once");
+    await expect(page.getByRole("region", { name: "Develop tile", exact: true })).toContainText("grow your city");
     await expect(page.getByRole("button", { name: "Assign Civilian", exact: true })).toHaveCount(0);
     expect((await snapshot(guest)).revision).toBe(state.revision);
     for (const bot of bots) expect(bot.state!.perspectiveId).not.toBe(state.perspectiveId);

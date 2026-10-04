@@ -8,10 +8,10 @@ describe("resource opportunities", () => {
       const state = createGame(seed, count);
       expect(state.tiles).toEqual(createGame(seed, count).tiles);
       expect(state.tiles).not.toEqual(createGame(seed + "-other", count).tiles);
-      expect(new Set(state.tiles.map(tile => tile.resource).filter(Boolean))).toEqual(new Set(["orchard", "wheat", "fishery", "forest", "mine"]));
+      for (const resource of ["orchard", "wheat", "fishery", "animal", "mine"]) expect(state.tiles.some(tile => tile.resource === resource)).toBe(true);
       for (const tile of state.tiles) {
         if (tile.resource === "orchard" || tile.resource === "wheat") expect(tile.terrain).toBe("grass");
-        if (tile.resource === "forest") expect(tile.terrain).toBe("forest");
+        if (tile.resource === "animal") expect(tile.terrain).toBe("forest");
         const near = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => getTile(state, tile.x + dx, tile.y + dy));
         if (tile.resource === "fishery") { expect(tile.terrain).toBe("water"); expect(near.some(tile => tile && tile.terrain !== "water")).toBe(true); }
         if (tile.resource === "mine") expect(tile.terrain).toBe("mountain");

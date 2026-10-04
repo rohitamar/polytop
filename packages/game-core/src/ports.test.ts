@@ -21,6 +21,7 @@ const round = (state: GameState) => {
 describe("Ports and Rafts", () => {
   it("builds within inland city territory without requiring water beside its center", () => {
     const state = fixture();
+    state.cities[0].expanded = true;
     getTile(state, 5, 5)!.terrain = "grass";
     getTile(state, 6, 5)!.terrain = "water";
     const before = structuredClone(state);
@@ -51,7 +52,7 @@ describe("Ports and Rafts", () => {
     state.units[0].movement = 3;
     expect(getReachableTiles(state, "warrior-1").some(tile => tile.x === 6 && tile.y === 5)).toBe(false);
     state = move(state, 5, 5);
-    expect(state.units[0]).toMatchObject({ id: "warrior-1", unitType: "warrior", embarked: true, hp: 7, maxHp: 10, movement: 0, maxMovement: 2, attack: 0, defense: 1 });
+    expect(state.units[0]).toMatchObject({ id: "warrior-1", unitType: "raft", carriedUnitType: "warrior", embarked: true, hp: 7, maxHp: 10, movement: 0, maxMovement: 2, attack: 0, defense: 1 });
     expect(getReachableTiles(state, "warrior-1")).toEqual([]);
     state = round(state);
     expect(getAttackTargets(state, "warrior-1")).toEqual([]);

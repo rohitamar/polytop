@@ -6,8 +6,6 @@ import {
   getPlayerView,
   isTileVisible,
   isTileExplored,
-  economy,
-  resourceDefinitions,
   getRoadBuildingReason,
   hasTechnology,
   roadRules,
@@ -25,7 +23,12 @@ import {
   getProduction,
   positionKey,
   type GameAction,
-  getUpgradeCost,
+  getCityGrowth,
+  getCityPopulation,
+  getCityRewards,
+  rewardNames,
+  getNavalUpgradeReason,
+  areAtPeace,
   getAttackTargets,
   previewCombat,
   createGame,
@@ -37,7 +40,7 @@ import {
   type Position,
 } from "@reach/game-core";
 import { createWorld, type World } from "./world";
-import { opportunityNames } from "./resources";
+import { DevelopmentPanel } from "./development-panel";
 import { playerStyle } from "./player-style";
 import { Lobby } from "./lobby";
 import { TechnologyModal } from "./technology-modal";
@@ -73,13 +76,10 @@ function Icon({
 }
 
 function collectionNotice(previous: GameState, next: GameState) {
-  const remaining = new Set(next.tiles.filter(tile => tile.resource).map(positionKey));
-  const player = next.players.find(player => player.id === next.perspectiveId)!;
-  const before = previous.players.find(candidate => candidate.id === player.id)!;
-  const reward = player.technologies.length > before.technologies.length
-    ? previous.tiles.reduce((total, tile) => total + (tile.resource && !remaining.has(positionKey(tile)) && previous.units.some(unit => unit.ownerId === player.id && positionKey(unit) === positionKey(tile)) ? resourceDefinitions[tile.resource].goldReward : 0), 0)
-    : Math.max(0, player.resources.gold - before.resources.gold);
-  return reward ? `+${reward} Gold - Resource collected` : "";
+  const playerId = next.perspectiveId ?? next.activePlayerId;
+  const before = previous.cities.filter(city => city.ownerId === playerId).reduce((sum, city) => sum + (city.population ?? 0), 0);
+  const after = next.cities.filter(city => city.ownerId === playerId).reduce((sum, city) => sum + (city.population ?? 0), 0);
+  return after > before ? `+${after - before} city population` : "";
 }
 
 function App() {
@@ -332,7 +332,7 @@ function App() {
         return;
       }
       const resource = getTile(current, position.x, position.y);
-      if (!selection.current && resource?.resource && !current.units.some(unit => positionKey(unit) === positionKey(position)) && !current.cities.some(city => positionKey(city) === positionKey(position))) {
+      if (!selection.current && resource && !current.units.some(unit => positionKey(unit) === positionKey(position)) && !current.cities.some(city => positionKey(city) === positionKey(position))) {
         if (!citySelection.current) setCitySelection(getTileTerritory(current, position.x, position.y)?.cityId ?? null);
         setResourceTile({ x: position.x, y: position.y });
         clearTarget();
@@ -504,7 +504,8 @@ function App() {
 
   const treasuryPlayer = state.players.find(player => player.id === network.current?.playerId) ?? activePlayer;
   const production = getProduction(state, treasuryPlayer.id);
-  const population = city && city.ownerId === state.perspectiveId ? getPlayerPopulation(state, city.ownerId) : null;
+  const population = city && city.ownerId === state.perspectiveId ? getCityPopulation(state, city) : null;
+  const growth = city ? getCityGrowth(state, city) : null;
   const playerPopulation = getPlayerPopulation(state, treasuryPlayer.id);
   const cityProduction = city ? getCityProduction(state, city.id) : null;
   const cityName = (cityId: string | null | undefined) => {
@@ -514,9 +515,6 @@ function App() {
     return player ? `${player.name} · Town Center ${controlled.id.split("-").at(-1)}` : `Neutral Town Center ${controlled.id.replace("neutral-", "")}`;
   };
   const resource = resourceTile ? getTile(state, resourceTile.x, resourceTile.y) : undefined;
-  const claim = resource ? getTileTerritory(state, resource.x, resource.y) : undefined;
-  const resourceCity = state.cities.find(city => city.id === claim?.cityId);
-  const yieldRule = resource?.resource ? resourceDefinitions[resource.resource] : undefined;
   const portSites = placingPort ? state.tiles.filter(tile => getPortBuildingReason(state, treasuryPlayer.id, tile) === null) : [];
   useEffect(() => { world.current?.setPortPlacement(placingPort ? treasuryPlayer.id : null); }, [placingPort, treasuryPlayer.id, state]);
   const portReason = portTile ? getPortBuildingReason(state, treasuryPlayer.id, portTile) : "Select a tile";
@@ -553,7 +551,7 @@ function App() {
       <section className="treasury-bar" aria-label="Civilization resources">
         <div className="treasury-resource"><span>Gold</span><b data-testid="gold">{treasuryPlayer.resources.gold}</b></div>
         <div className="treasury-resource"><span>Income</span><b data-testid="income">+{production.gold}/turn</b></div>
-        <div className="treasury-resource"><span>Population</span><b data-testid="player-population">{playerPopulation.used} / {playerPopulation.capacity}</b></div>
+        <div className="treasury-resource"><span>Unit slots</span><b data-testid="player-population">{playerPopulation.used} / {playerPopulation.capacity}</b></div>
         <button className="technology-toggle" aria-expanded={showTechnologies} onClick={() => { if (busy.current) return; stopRoadPlacement(); setShowTechnologies(!showTechnologies); }}>Technologies</button>
         {hasTechnology(state, treasuryPlayer.id, "roads") && <button className="technology-toggle" disabled={moving || waiting || !canAct} aria-pressed={placingRoad} onClick={() => {
           if (busy.current) return;
@@ -574,6 +572,12 @@ function App() {
         setNotice("Select a golden Water tile to build a Port.");
       }}>{placingPort ? "Cancel ports" : "Build Ports"}</button>}
       </section>
+      {(hasTechnology(state, treasuryPlayer.id, "strategy") || state.peaceOffers?.some(offer => offer.to === treasuryPlayer.id) || state.treaties?.some(treaty => treaty.a === treasuryPlayer.id || treaty.b === treasuryPlayer.id)) && <details className="peace-panel"><summary>Peace treaties</summary>{state.players.filter(player => player.id !== treasuryPlayer.id).map(player => {
+        const peace = areAtPeace(state, treasuryPlayer.id, player.id);
+        const offered = state.peaceOffers?.some(offer => offer.from === player.id && offer.to === treasuryPlayer.id);
+        const sent = state.peaceOffers?.some(offer => offer.to === player.id && offer.from === treasuryPlayer.id);
+        return <div key={player.id}><span>{player.name} · {peace ? "At peace" : "No treaty"}</span><button disabled={moving || waiting || !canAct || !!sent && !peace && !offered} onClick={() => cityAction({ type: peace ? "BREAK_PEACE" : offered ? "ACCEPT_PEACE" : "PROPOSE_PEACE", playerId: treasuryPlayer.id, otherPlayerId: player.id })}>{peace ? "Break peace" : offered ? "Accept peace" : sent ? "Offer sent" : "Offer peace"}</button></div>;
+      })}<small>Breaking peace ends your units’ actions and removes them from the other tribe’s territory.</small></details>}
       {placingPort && <section className="resource-panel road-panel" aria-label="Build Port">
         <div className="panel-heading"><span className="eyebrow">PORT CONSTRUCTION</span><button aria-label="Close ports" disabled={moving || waiting} onClick={stopRoadPlacement}>×</button></div>
         <h2>Build Port</h2><p>Cost: {portRules.goldCost} Gold</p>
@@ -604,23 +608,21 @@ function App() {
         </div>
         <div className="turn-summary">{activeUnits.length} unit{activeUnits.length === 1 ? "" : "s"}</div>
       </aside>
-      {city && cityProduction && (
+      {city && cityProduction && !resourceTile && (
         <section className="city-panel" aria-label="Selected city">
           <div className="panel-heading"><span className="eyebrow">CITY TERRITORY</span>{city.ownerId === treasuryPlayer.id && <button className="recruitment-toggle" disabled={moving || waiting} aria-expanded={showRecruitment} onClick={() => setShowRecruitment(!showRecruitment)}>{showRecruitment ? "Close recruitment" : "Recruit units"}</button>}<button aria-label="Close city" disabled={moving || waiting} onClick={() => select(null)}>×</button></div>
           <h2>{cityName(city.id)}</h2>
           <div className="city-stats">
-            <div><span>Town Center</span><b data-testid="town-hall">{city.townHallLevel} / {economy.maxLevel}</b></div>
-            <div><span>Owner population</span><b data-testid="population">{population ? `${population.used} / ${population.capacity}` : "Unknown"}</b></div>
-            <div><span>Available population</span><b data-testid="available-population">{population?.available ?? "Unknown"}</b></div>
+            <div><span>Town Center</span><b data-testid="town-hall">Level {city.townHallLevel}</b></div>
+            <div><span>City unit slots</span><b data-testid="population">{population ? `${population.used} / ${population.capacity}` : "Unknown"}</b></div>
+            <div><span>Growth</span><b data-testid="available-population">{growth ? `${growth.current} / ${growth.needed}` : "Unknown"}</b></div>
           </div>
           <div className="city-income" aria-label="City production">
             <span>+{cityProduction.gold} Gold/turn</span>
           </div>
           {city.ownerId === treasuryPlayer.id && <div className="city-actions">
-            {getUpgradeCost(city) !== null ? <button disabled={moving || waiting || !canAct || activePlayer.resources.gold < getUpgradeCost(city)!}
-              onClick={() => cityAction({ type: "UPGRADE_TOWN_HALL", playerId: activePlayer.id, cityId: city.id })}>Upgrade Town Center · {getUpgradeCost(city)} Gold</button> : <p>Maximum Town Center level</p>}
+            {city.rewardPending ? <><p>City leveled up! Choose a reward:</p>{getCityRewards(city.townHallLevel).map(reward => <button key={reward} disabled={moving || waiting || !canAct || reward === "giant" && city.giantReward === "available"} onClick={() => cityAction({ type: "CHOOSE_CITY_REWARD", playerId: treasuryPlayer.id, cityId: city.id, reward })}>{rewardNames[reward]}</button>)}</> : <p>Add {Math.max(0, (growth?.needed ?? 0) - (growth?.current ?? 0))} population to reach the next level.</p>}
             {city.giantReward === "available" && <><button disabled={moving || waiting || !canAct || getGiantRewardReason(state, treasuryPlayer.id, city.id) !== null} onClick={() => cityAction({ type: "CLAIM_GIANT", playerId: treasuryPlayer.id, cityId: city.id })}>Claim Giant reward</button><small>{getGiantRewardReason(state, treasuryPlayer.id, city.id) ?? "Free super-unit · Ready next turn"}</small></>}
-            {city.townHallLevel < economy.maxLevel && <small>Maximum level grants one Giant reward. Clear the city tile to claim it.</small>}
           </div>}
           {showRecruitment && city.ownerId === treasuryPlayer.id && <section className="recruitment-panel" aria-label="Recruit units">
             <h3>Recruit</h3>
@@ -628,7 +630,7 @@ function App() {
             {unitDefinitions.filter(definition => definition.domain === "land" && definition.recruitable).map(definition => {
               const reason = !connected ? "Match disconnected" : waiting ? "Waiting for server" : moving ? "Action in progress" : getRecruitmentReason(state, treasuryPlayer.id, city.id, definition.id);
               return <article key={definition.id} aria-label={definition.name}>
-                <div><strong>{definition.name}</strong><span>{definition.goldCost} Gold · {definition.populationCost} Population</span>
+                <div><strong>{definition.name}</strong><span>{definition.goldCost} Gold · 1 unit slot</span>
                   <span>{definition.maxHp} HP · {definition.attack} ATK · {definition.defense} DEF · {definition.maxMovement} Move · Range {definition.range}</span>
                   {definition.requiredTechnology && <span>Requires {getTechnology(definition.requiredTechnology)!.name}</span>}
                   <small>{reason ?? "Available"}</small></div>
@@ -636,20 +638,10 @@ function App() {
               </article>;
             })}
           </section>}
-          {selected ? <button className="manage-resources" disabled={moving || waiting} onClick={() => { select(null); setCitySelection(city.id); setNotice("Move onto resources to collect Gold."); }}>Inspect resources</button> : <p className="city-hint">Resource collection awards Gold once.</p>}
+          {selected ? <button className="manage-resources" disabled={moving || waiting} onClick={() => { select(null); setCitySelection(city.id); setNotice("Select territory tiles to harvest resources or build improvements."); }}>Inspect resources</button> : <p className="city-hint">Harvest resources and build improvements to grow this city.</p>}
         </section>
       )}
-      {resource?.resource && yieldRule && (
-        <section className="resource-panel" aria-label="Resource tile">
-          <div className="panel-heading"><span className="eyebrow">RESOURCE TILE</span><button aria-label="Close resource" disabled={moving || waiting} onClick={() => setResourceTile(null)}>×</button></div>
-          <h2>{opportunityNames[resource.resource]}</h2>
-          <span className="resource-state">Available - One-time collection</span>
-          <p className="resource-yield">+{yieldRule.goldReward} Gold once</p>
-          <p className="resource-owner">{claim?.cityId ? `Controlled by ${cityName(claim.cityId)}` : "Unclaimed land"}</p>
-          <p className="resource-restriction">{yieldRule.requiredTechnology ? `Requires ${getTechnology(yieldRule.requiredTechnology)!.name}. Move an eligible unit here to collect.` : "Move an eligible unit here to collect automatically."}</p>
-          {resourceCity && resourceCity.id !== city?.id && <button className="worker-action" disabled={moving || waiting} onClick={() => { select(null); setCitySelection(resourceCity.id); setResourceTile(resource); }}>Select controlling city</button>}
-        </section>
-      )}
+      {resource && <DevelopmentPanel state={state} tile={resource} playerId={treasuryPlayer.id} blocked={moving || waiting || !canAct} onAction={cityAction} onClose={() => setResourceTile(null)} />}
       <div className={`map-tools ${city ? "city-open" : ""}`}>
         <span className="north">
           N<Icon name="compass" />
@@ -662,8 +654,11 @@ function App() {
           <Icon name="reset" />
         </button>
       </div>
-      {selected && unit && !combat && <section className="unit-info" aria-label="Unit information">
+      {selected && unit && !combat && !resourceTile && <section className="unit-info" aria-label="Unit information">
         <strong>{getUnitDefinition(unit.unitType)!.name}</strong>
+        <button disabled={moving || waiting || !canAct} onClick={() => { const tile = { x: unit.x, y: unit.y }; select(null); setResourceTile(tile); }}>Develop this tile</button>
+        {unit.unitType === "raft" && ["scout", "rammer", "bomber"].map(type => <div key={type}><button disabled={moving || waiting || !canAct || getNavalUpgradeReason(state, treasuryPlayer.id, unit.id, type) !== null} onClick={() => cityAction({ type: "UPGRADE_NAVAL", playerId: treasuryPlayer.id, unitId: unit.id, unitType: type as "scout" | "rammer" | "bomber" })}>Upgrade to {getUnitDefinition(type)!.name} · {getUnitDefinition(type)!.goldCost} Gold</button><small>{getNavalUpgradeReason(state, treasuryPlayer.id, unit.id, type)}</small></div>)}
+        {unit.embarked && getTile(state, unit.x, unit.y)?.resource === "starfish" && <button disabled={moving || waiting || !canAct || unit.actionPhase !== "ready" || !hasTechnology(state, treasuryPlayer.id, "navigation")} onClick={() => cityAction({ type: "HARVEST_STARFISH", playerId: treasuryPlayer.id, unitId: unit.id })}>Harvest Starfish · +8 Gold</button>}
         <p>{unit.hp} / {unit.maxHp} HP · {unit.attack} Attack · {unit.defense} Defense</p>
         <p>{unit.movement} / {unit.maxMovement} Movement · Range {unit.range}</p>
         <small>{getUnitDefinition(unit.unitType)!.abilities.filter(ability => hasUnitAbility(state.rules, unit.unitType, ability)).join(" · ")}</small>
@@ -752,8 +747,8 @@ function App() {
           </p>
           <p>
             Enter a city to claim it. Click a city to inspect or upgrade it.
-            Town Centers generate Gold once at the beginning of your turn. Move onto resources to collect Gold once; mines require Mining. Town Centers provide population capacity. Spend Gold on technologies, existing recruitment, or Town Center upgrades.
-            Recruit land units at an empty owned city using Gold and population capacity. Fishing unlocks Ports on owned coastal Water. Land units embark as Rafts at Ports and return to their original type when landing. Recruits become ready on your next turn.
+            Cities generate Gold at the beginning of your turn. Select owned tiles to harvest fruit, animals, or fish and build improvements. Spend Gold to gain population; cities level up and offer rewards. Each city supports its level plus one units.
+            Recruit land units at an empty owned city using Gold and a city unit slot. Fishing unlocks Ports on owned coastal Water. Land units embark as Rafts at Ports and return to their original type when landing. Recruits become ready on your next turn.
           </p>
           <ul>
             <li>Grass costs 1 point.</li>

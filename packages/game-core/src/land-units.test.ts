@@ -157,8 +157,8 @@ describe("core land roster", () => {
   });
   it("grants a single Giant at the maximum city upgrade without displacement or Gold recruitment", () => {
     let state = fixture();
-    const upgrade: GameAction = { type: "UPGRADE_TOWN_HALL", playerId: "player-1", cityId: "city-1" };
-    state = applyAction(applyAction(state, upgrade), upgrade);
+    state.cities[0] = { ...state.cities[0], townHallLevel: 5, population: 14, rewardPending: true };
+    state = applyAction(state, { type: "CHOOSE_CITY_REWARD", playerId: "player-1", cityId: "city-1", reward: "giant" });
     expect(state.cities[0].giantReward).toBe("available");
     const claim: GameAction = { type: "CLAIM_GIANT", playerId: "player-1", cityId: "city-1" };
     expect(() => applyAction(state, claim)).toThrow("empty");

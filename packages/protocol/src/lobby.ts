@@ -74,10 +74,15 @@ export function parseLobbyClientMessage(
     const valid = a.type === "END_TURN" ? exact(a, ["type"]) :
       a.type === "UNLOCK_TECHNOLOGY" ? exact(a, ["type", "technologyId"]) && id(a.technologyId) :
       a.type === "RECRUIT_UNIT" ? exact(a, ["type", "cityId", "unitType"]) && id(a.cityId) && id(a.unitType) :
-      (a.type === "BUILD_ROAD" || a.type === "BUILD_PORT") ? exact(a, ["type", "to"]) && position(a.to) :
+      (["BUILD_ROAD", "BUILD_PORT", "HARVEST_RESOURCE", "CLEAR_FOREST", "BUILD_BRIDGE"].includes(a.type as string)) ? exact(a, ["type", "to"]) && position(a.to) :
       a.type === "move" ? exact(a, ["type", "unitId", "to"]) && id(a.unitId) && position(a.to) :
       a.type === "ATTACK_UNIT" ? exact(a, ["type", "unitId", "targetId"]) && id(a.unitId) && id(a.targetId) :
-      (a.type === "UPGRADE_TOWN_HALL" || a.type === "CLAIM_GIANT") ? exact(a, ["type", "cityId"]) && id(a.cityId) :
+      a.type === "CHOOSE_CITY_REWARD" ? exact(a, ["type", "cityId", "reward"]) && id(a.cityId) && id(a.reward) :
+      a.type === "BUILD_IMPROVEMENT" ? exact(a, ["type", "to", "improvement"]) && position(a.to) && id(a.improvement) :
+      a.type === "UPGRADE_NAVAL" ? exact(a, ["type", "unitId", "unitType"]) && id(a.unitId) && id(a.unitType) :
+      a.type === "HARVEST_STARFISH" ? exact(a, ["type", "unitId"]) && id(a.unitId) :
+      ["PROPOSE_PEACE", "ACCEPT_PEACE", "BREAK_PEACE"].includes(a.type as string) ? exact(a, ["type", "otherPlayerId"]) && id(a.otherPlayerId) :
+      a.type === "CLAIM_GIANT" ? exact(a, ["type", "cityId"]) && id(a.cityId) :
       false;
     return valid ? value as LobbyClientMessage : null;
   }

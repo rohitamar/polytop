@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { getUnitDefinition, type UnitType } from "../packages/game-core/src/index";
 import "../apps/web/src/debug";
+import { travel, develop, research as researchTechnology } from "./development-helpers";
 
 const snapshot = (page: Page) => page.evaluate(() => window.__GAME_DEBUG__!.getState());
 async function settle(page: Page) {
@@ -41,7 +42,7 @@ async function research(page: Page, names: string[]) {
 }
 const recruits: [UnitType, string[]][] = [
   ["warrior", []], ["rider", ["Riding"]], ["archer", ["Hunting", "Archery"]],
-  ["defender", ["Organization", "Strategy"]], ["swordsman", ["Smithery"]],
+  ["defender", ["Organization", "Strategy"]], ["swordsman", ["Climbing", "Mining", "Smithery"]],
   ["catapult", ["Hunting", "Forestry", "Mathematics"]],
 ];
 for (const [type, technologies] of recruits) {
@@ -155,15 +156,18 @@ test("Rider Escape synchronizes between browsers and survives reconnect", async 
   } finally { await context.close(); }
 });
 
-test("claims and renders a Giant through the maximum city upgrade", async ({ page }, info) => {
+test("claims and renders a Giant through population and a level-five reward", async ({ page }, info) => {
   await page.goto("/");
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
   await page.evaluate(() => window.__GAME_DEBUG__!.setSeed("fern-104"));
   await move(page, "warrior-1", 5, 5);
-  while ((await snapshot(page)).players[0].resources.gold < 12) { await end(page); await end(page); }
+  test.setTimeout(300000);
+  for (const id of ["riding", "roads", "climbing"] as const) await researchTechnology(page, id);
+  await travel(page, "warrior-1", { x: 10, y: 7 }, true);
+  await develop(page, "city-1", 5);
+  await page.keyboard.press("Escape");
   await tile(page, 4, 5);
-  await page.getByRole("button", { name: "Upgrade Town Center", exact: false }).click();
-  await page.getByRole("button", { name: "Upgrade Town Center", exact: false }).click();
+  await page.getByRole("button", { name: /^Giant ·/ }).click();
   const before = await snapshot(page);
   await page.getByRole("button", { name: "Claim Giant reward", exact: true }).click();
   await expect.poll(async () => (await snapshot(page)).units.some(unit => unit.unitType === "giant")).toBe(true);

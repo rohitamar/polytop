@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createGame, gridDistance, getTechnologyCost, canUnitEnterTerrain, getReachableTiles, getTile, movementCost, positionKey, type GameState, type Position } from "../packages/game-core/src/index";
+import { inspect as inspectDevelopment, research as researchDevelopment, fund as fundDevelopment } from "./development-helpers";
+import { getHarvestReason, createGame, gridDistance, getTechnologyCost, canUnitEnterTerrain, getReachableTiles, getTile, movementCost, positionKey, type GameState, type Position } from "../packages/game-core/src/index";
 import "../apps/web/src/debug";
 
 const snapshot = (page: Page) => page.evaluate(() => window.__GAME_DEBUG__!.getState());
@@ -58,42 +59,6 @@ async function travel(page: Page, id: string, target: Position, map?: GameState[
   throw new Error("Could not reach target");
 }
 
-test("Climbing and Mining enable independent mountain access and one-time Gold collection", async ({ page }, testInfo) => {
-  test.setTimeout(120000);
-  await page.goto("/");
-  await page.waitForFunction(() => !!window.__GAME_DEBUG__);
-  await round(page);
-  await round(page);
-  await page.getByRole("button", { name: "Technologies", exact: true }).click();
-  await page.getByRole("button", { name: /^Mining: / }).click();
-  await expect(page.getByRole("region", { name: "Technology details" })).toContainText("Requires Climbing");
-  await page.getByRole("button", { name: /^Climbing: / }).click();
-  await page.getByRole("button", { name: "Research Climbing", exact: true }).click();
-  await page.getByRole("button", { name: "Close technologies" }).click();
-  await move(page, "warrior-1", { x: 3, y: 5 });
-  await round(page);
-  await move(page, "warrior-1", { x: 3, y: 6 });
-  await round(page);
-  let state = await snapshot(page);
-  const target = state.tiles.filter(tile => tile.resource === "mine").sort((a, b) => (distances(state, "warrior-1", a).get(positionKey(state.units[0])) ?? Infinity) - (distances(state, "warrior-1", b).get(positionKey(state.units[0])) ?? Infinity))[0];
-  await travel(page, "warrior-1", target);
-  state = await snapshot(page);
-  expect(getTile(state, target.x, target.y)!.resource).toBe("mine");
-  expect(state.players[0].technologies).toEqual(["climbing"]);
-  while ((await snapshot(page)).players[0].resources.gold < getTechnologyCost(await snapshot(page), "player-1", "mining")) await round(page);
-  const before = await snapshot(page);
-  await page.getByRole("button", { name: "Technologies", exact: true }).click();
-  await page.getByRole("button", { name: /^Mining: / }).click();
-  await page.getByRole("button", { name: "Research Mining", exact: true }).click();
-  const next = await snapshot(page);
-  expect(getTile(next, target.x, target.y)!.resource).toBeUndefined();
-  expect(next.players[0].resources.gold).toBe(before.players[0].resources.gold - getTechnologyCost(before, "player-1", "mining") + 3);
-  expect(next.players[1].technologies).toEqual([]);
-  await page.getByRole("button", { name: "Close technologies" }).click();
-  await expect(page.getByRole("status")).toContainText("+3 Gold");
-  await page.screenshot({ path: testInfo.outputPath("mining-collection.png") });
-});
-
 test("Fishing builds Ports and existing units embark, sail and land", async ({ page }, testInfo) => {
   test.setTimeout(180000);
   await page.goto("/");
@@ -125,8 +90,19 @@ test("Fishing builds Ports and existing units embark, sail and land", async ({ p
   await round(page);
   await move(page, "warrior-1", water);
   state = await snapshot(page);
-  expect(state.units[0]).toMatchObject({ unitType: "warrior", embarked: true, movement: 0, hasAttacked: true });
+  expect(state.units[0]).toMatchObject({ unitType: "raft", carriedUnitType: "warrior", embarked: true, movement: 0, hasAttacked: true });
   await page.screenshot({ path: testInfo.outputPath("port-embarked.png") });
+  await round(page);
+  await researchDevelopment(page, "sailing");
+  await fundDevelopment(page, 5);
+  const upgradeBefore = await snapshot(page);
+  const shipPoint = await page.evaluate(() => window.__GAME_DEBUG__!.getUnitScreenPosition("warrior-1"));
+  await page.mouse.click(shipPoint.x, shipPoint.y);
+  await page.getByRole("button", { name: /^Upgrade to Scout/ }).click();
+  await settled(page, upgradeBefore.revision + 1);
+  expect((await snapshot(page)).units[0]).toMatchObject({ unitType: "scout", carriedUnitType: "warrior", actionPhase: "complete" });
+  expect((await snapshot(page)).players[0].resources.gold).toBe(upgradeBefore.players[0].resources.gold - 5);
+  await page.screenshot({ path: testInfo.outputPath("upgraded-scout.png") });
   await round(page);
   state = await snapshot(page);
   const destination = getReachableTiles(state, "warrior-1").find(tile => getTile(state, tile.x, tile.y)?.terrain === "water" && tile.path.length >= 1)!;
@@ -162,25 +138,16 @@ test("resource depletion and technology ownership survive multiplayer reload wit
     await page.getByRole("button", { name: "Start game", exact: true }).click();
     await expect(page.getByTestId("active-player")).toContainText("Fern");
     await expect(guest.getByTestId("active-player")).toContainText("Fern");
-    await move(page, "warrior-1", { x: 4, y: 4 });
-    await settled(guest, 1);
-    await page.getByRole("button", { name: "End Turn", exact: true }).click();
-    await settled(guest, 2);
-    await guest.getByRole("button", { name: "End Turn", exact: true }).click();
-    await settled(page, 3);
+    await researchDevelopment(page, "organization", guest);
+    await fundDevelopment(page, 2, guest);
     const before = await snapshot(page);
-    await move(page, "warrior-1", { x: 4, y: 3 });
-    await settled(guest, 4);
-    expect((await snapshot(page)).players[0].resources.gold).toBe(before.players[0].resources.gold + 2);
-    expect((await snapshot(page)).players[1].resources).toEqual(before.players[1].resources);
-    expect(getTile(await snapshot(guest), 4, 3)?.resource).toBeUndefined();
-    await page.getByRole("button", { name: "Technologies", exact: true }).click();
-    await page.getByRole("button", { name: /^Climbing: / }).click();
-    await page.getByRole("button", { name: "Research Climbing", exact: true }).click();
-    await settled(page, 5);
-    await settled(guest, 5);
+    const resource = before.tiles.find(tile => getHarvestReason(before, before.activePlayerId, tile) === null)!;
+    await inspectDevelopment(page, resource);
+    await page.getByRole("button", { name: /^Harvest/ }).click();
+    await settled(guest, before.revision + 1);
+    expect((await snapshot(page)).players[0].resources.gold).toBe(before.players[0].resources.gold - 2);
     const saved = await snapshot(page);
-    expect(saved.players[0].technologies).toEqual(["climbing"]);
+    expect(saved.players[0].technologies).toEqual(["organization"]);
     expect(saved.players[1].technologies).toEqual([]);
     await page.reload();
     await expect.poll(async () => (await snapshot(page)).revision).toBe(saved.revision);
@@ -188,10 +155,10 @@ test("resource depletion and technology ownership survive multiplayer reload wit
     expect(await snapshot(page)).toEqual(saved);
     expect((await snapshot(guest)).revision).toBe(saved.revision);
     await page.getByRole("button", { name: "Technologies", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Climbing: Researched", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Organization: Researched", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Close technologies" }).click();
     await page.getByRole("button", { name: "End Turn", exact: true }).click();
-    await settled(guest, 6);
+    await settled(guest, saved.revision + 1);
     expect((await snapshot(guest)).players[0].resources.gold).toBe(0);
     await page.screenshot({ path: testInfo.outputPath("resumed-economy.png") });
   } finally { await context.close(); }

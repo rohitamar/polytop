@@ -1,159 +1,64 @@
 import { describe, expect, it } from "vitest";
-import {
-  applyAction,
-  createGame as generateGame,
-  getIncome,
-  getUpgradeCost,
-  type GameState,
-} from "./index";
-
-const end = (state: GameState) =>
-  applyAction(state, { type: "END_TURN", playerId: state.activePlayerId });
-const upgrade = (
-  state: GameState,
-  cityId = "city-1",
-  playerId = state.activePlayerId,
-) => applyAction(state, { type: "UPGRADE_TOWN_HALL", playerId, cityId });
-const move = (state: GameState, x = 5, y = 5) =>
-  applyAction(state, {
-    type: "move",
-    playerId: state.activePlayerId,
-    unitId: "warrior-1",
-    to: { x, y },
+import { applyAction, createGame, getCityGrowth, getCityRewards, getIncome, getTerritory, getTile, type CityReward, type GameState } from "./index";
+const fixture = () => createGame("fern-104", 2, { scenario: "demo" });
+const choose = (state: GameState, reward: CityReward) => applyAction(state, { type: "CHOOSE_CITY_REWARD", playerId: "player-1", cityId: "city-1", reward });
+describe("city progression", () => {
+  it("levels automatically from population, pauses for a choice, and carries overflow", () => {
+    let state = fixture(); state.cities[0].population = 12;
+    state = applyAction(state, { type: "END_TURN", playerId: "player-1" });
+    expect(state.cities[0]).toMatchObject({ townHallLevel: 2, rewardPending: true });
+    state = applyAction(state, { type: "END_TURN", playerId: "player-2" });
+    state = choose(state, "workshop");
+    expect(state.cities[0]).toMatchObject({ townHallLevel: 3, rewardPending: true, workshop: true });
+    state = choose(state, "resources");
+    expect(state.cities[0]).toMatchObject({ townHallLevel: 4, rewardPending: true });
+    state = choose(state, "population");
+    expect(state.cities[0]).toMatchObject({ townHallLevel: 5, rewardPending: true, population: 15 });
+    state = choose(state, "giant");
+    expect(state.cities[0]).toMatchObject({ townHallLevel: 5, giantReward: "available", rewardPending: false });
+    expect(getCityGrowth(state, state.cities[0]).current).toBe(1);
   });
-
-const createGame = (seed = "fern-104", count = 2) => generateGame(seed, count, count === 2 ? { scenario: "demo" } : {});
-
-describe("cities and economy", () => {
-  it.each([2, 3, 8])(
-    "creates deterministic owned and neutral cities for %i players",
-    (count) => {
-      const state = createGame("fern-104", count);
-      expect(state).toEqual(createGame("fern-104", count));
-      expect(new Set(state.cities.map((city) => city.id)).size).toBe(
-        state.cities.length,
-      );
-      expect(
-        new Set(state.cities.map((city) => `${city.x},${city.y}`)).size,
-      ).toBe(state.cities.length);
-      expect(state.cities.filter((city) => city.ownerId === null)).toHaveLength(
-        4,
-      );
-      for (const player of state.players) {
-        expect(
-          state.cities.filter((city) => city.ownerId === player.id),
-        ).toHaveLength(1);
-        expect(getIncome(state, player.id)).toBeGreaterThanOrEqual(2);
-        expect(player.resources.gold).toBe(player.id === state.activePlayerId ? getIncome(state, player.id) : 0);
-      }
-    },
-  );
-
-  it("captures neutral cities without immediate payment and preserves the input", () => {
-    const initial = createGame();
-    const snapshot = structuredClone(initial);
-    const captured = move(initial);
-    expect(
-      captured.cities.find((city) => city.id === "neutral-1")?.ownerId,
-    ).toBe("player-1");
-    expect(getIncome(captured, "player-1")).toBeGreaterThan(getIncome(initial, "player-1"));
-    expect(captured.players[0].resources.gold).toBe(initial.players[0].resources.gold);
-    expect(end(captured).players[0].resources.gold).toBe(initial.players[0].resources.gold);
-    expect(end(end(captured)).players[0].resources.gold).toBe(initial.players[0].resources.gold + getIncome(captured, "player-1"));
-    expect(initial).toEqual(snapshot);
-  });
-
-  it("transfers enemy income and retains the captured city's level", () => {
-    const initial = createGame();
-    initial.cities[1] = {
-      ...initial.cities[1],
-      x: 5,
-      y: 5,
-      townHallLevel: 3,
-    };
-    initial.cities = initial.cities.filter((city) => city.id !== "neutral-1");
-    const captured = move(initial);
-    expect(captured.cities[1]).toMatchObject({
-      ownerId: "player-1",
-      townHallLevel: 3,
-    });
-    expect(getIncome(captured, "player-2")).toBe(0);
-    expect(end(captured).players[1].resources.gold).toBe(0);
-    expect(end(end(captured)).players[0].resources.gold).toBe(initial.players[0].resources.gold + getIncome(captured, "player-1"));
-  });
-
-  it("captures every city entered along an accepted movement path", () => {
-    const initial = createGame();
-    initial.units[0].movement = 2;
-    const state = move(initial, 6, 5);
-    expect(state.cities.find((city) => city.id === "neutral-1")?.ownerId).toBe(
-      "player-1",
-    );
-  });
-
-  it("captures after a lethal combat advance", () => {
-    const state = createGame();
-    state.units[1] = { ...state.units[1], x: 5, y: 5, hp: 1 };
-    const next = applyAction(state, {
-      type: "ATTACK_UNIT",
-      playerId: "player-1",
-      unitId: "warrior-1",
-      targetId: "warrior-2",
-    });
-    expect(next.cities.find((city) => city.id === "neutral-1")?.ownerId).toBe(
-      "player-1",
-    );
-  });
-
-  it("charges centralized upgrade costs and pays the new income next turn", () => {
-    const initial = end(end(createGame()));
-    const next = upgrade(initial);
-    expect(initial.players[0].resources.gold).toBe(getIncome(initial, "player-1") * 2);
-    expect(next.players[0].resources.gold).toBe(initial.players[0].resources.gold - 4);
-    expect(next.cities[0]).toMatchObject({ townHallLevel: 2 });
-    expect(getUpgradeCost(next.cities[0])).toBe(8);
-    const funded = end(end(end(end(end(end(next))))));
-    const max = upgrade(funded);
-    expect(max.players[0].resources.gold).toBe(funded.players[0].resources.gold - 8);
-    expect(max.cities[0]).toMatchObject({ townHallLevel: 3 });
-    expect(getUpgradeCost(max.cities[0])).toBeNull();
-    expect(() => upgrade(max)).toThrow("maximum");
-    expect(next.revision).toBe(initial.revision + 1);
-  });
-
-  it.each(["poor", "enemy", "neutral", "missing", "inactive"])(
-    "rejects %s upgrades without mutation",
-    (scenario) => {
-      const state = createGame();
-      if (scenario === "poor") state.players[0].resources.gold = 0;
-      const before = structuredClone(state);
-      const city =
-        scenario === "enemy"
-          ? "city-2"
-          : scenario === "neutral"
-            ? "neutral-1"
-            : scenario === "missing"
-              ? "missing"
-              : "city-1";
-      expect(() =>
-        upgrade(state, city, scenario === "inactive" ? "player-2" : "player-1"),
-      ).toThrow();
-      expect(state).toEqual(before);
-    },
-  );
-
-  it.each([3, 8])("pays only the incoming owner across %i players", (count) => {
-    let state = createGame("fern-104", count);
-    for (let i = 0; i < count; i++) {
-      const before = state;
-      state = end(state);
-      for (const player of state.players)
-        expect(player.resources.gold).toBe(
-          before.players.find((p) => p.id === player.id)!.resources.gold +
-            (player.id === state.activePlayerId ? getIncome(state, player.id) : 0),
-        );
+  it.each([2, 3, 4, 5, 8])("offers two valid rewards at level %i", level => {
+    expect(getCityRewards(level)).toHaveLength(2);
+    for (const reward of getCityRewards(level)) {
+      const state = fixture(); state.cities[0] = { ...state.cities[0], townHallLevel: level, population: level * (level + 1) / 2 - 1, rewardPending: true };
+      const next = choose(state, reward);
+      expect(next.cities[0].rewardPending).toBe(false);
+      expect(state.cities[0].rewardPending).toBe(true);
+      if (reward === "resources") expect(next.players[0].resources.gold).toBe(10);
+      if (reward === "park") expect(getIncome(next, "player-1")).toBe(getIncome(state, "player-1") + 1);
+      if (reward === "explorer") expect(next.exploration!["player-1"].exploredTiles.length).toBeGreaterThan(state.exploration!["player-1"].exploredTiles.length);
     }
-    expect(state.activePlayerId).toBe("player-1");
-    expect(state.players[0].resources.gold).toBe(getIncome(state, "player-1") * 2);
+  });
+  it("expands territory only when Border Growth is chosen", () => {
+    const state = fixture(); state.cities = [{ ...state.cities[0], townHallLevel: 4, population: 9, rewardPending: true }];
+    expect(getTerritory(state).filter(claim => claim.cityId)).toHaveLength(9);
+    expect(getTerritory(choose(state, "borders")).filter(claim => claim.cityId)).toHaveLength(25);
+  });
+  it.each(["unavailable", "wrong-level", "foreign", "inactive", "duplicate"])("rejects %s reward claims atomically", reason => {
+    let state = fixture(); state.cities[0] = { ...state.cities[0], townHallLevel: 2, population: 2, rewardPending: reason !== "unavailable" };
+    if (reason === "foreign") state.cities[0].ownerId = "player-2";
+    if (reason === "inactive") state.activePlayerId = "player-2";
+    if (reason === "duplicate") state = choose(state, "workshop");
+    const before = structuredClone(state);
+    expect(() => choose(state, reason === "wrong-level" ? "giant" : "workshop")).toThrow();
+    expect(state).toEqual(before);
+  });
+  it("combat capture rehomes the advancing unit and detaches enemy support", () => {
+    const state = fixture(); state.cities[2].ownerId = "player-2";
+    state.units[1] = { ...state.units[1], x: 5, y: 5, hp: 1, homeCityId: state.cities[2].id };
+    state.units.push({ ...state.units[1], id: "survivor", hp: 10, x: 10, y: 8 });
+    const next = applyAction(state, { type: "ATTACK_UNIT", playerId: "player-1", unitId: "warrior-1", targetId: "warrior-2" });
+    expect(next.cities[2].ownerId).toBe("player-1");
+    expect(next.units.find(unit => unit.id === "warrior-1")!.homeCityId).toBe(state.cities[2].id);
+    expect(next.units.find(unit => unit.id === "survivor")!.homeCityId).toBeNull();
+  });
+  it("captures only the destination city, rehomes the capturer and detaches surviving enemy support", () => {
+    const state = fixture(); state.cities[2].ownerId = "player-2"; state.units[1].homeCityId = state.cities[2].id;
+    const next = applyAction(state, { type: "move", playerId: "player-1", unitId: "warrior-1", to: { x: 5, y: 5 } });
+    expect(next.units[0].homeCityId).toBe(state.cities[2].id);
+    expect(next.units[1].homeCityId).toBeNull();
+    expect(next.cities[2].ownerId).toBe("player-1");
+    expect(getTile(next, 5, 5)).toBeDefined();
   });
 });

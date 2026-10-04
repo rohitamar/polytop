@@ -134,7 +134,7 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
             room.state = updatePlayerExploration({ ...initial, exploration: undefined, activePlayerId: member.player.id,
               players: initial.players.map((player, i) => ({ ...player, id: room.members[i].player.id, name: room.members[i].player.name })),
               units: initial.units.map(unit => ({ ...unit, ownerId: ids.get(unit.ownerId)! })),
-              cities: initial.cities.map(city => ({ ...city, ownerId: city.ownerId ? ids.get(city.ownerId)! : null })) });
+              cities: initial.cities.map(city => ({ ...city, ownerId: city.ownerId ? ids.get(city.ownerId)! : null, capitalOf: city.capitalOf ? ids.get(city.capitalOf) : undefined })) });
             for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: getPlayerView(room.state, participant.player.id), action: null });
           } else {
             if (!room.state) throw new Error("Match has not started");

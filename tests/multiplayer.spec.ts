@@ -54,7 +54,7 @@ test("independent browsers play one authoritative match including economy and co
     });
     const resource = await page.evaluate(tile => window.__GAME_DEBUG__!.getTileScreenPosition(tile.x, tile.y), work);
     await page.mouse.click(resource.x, resource.y);
-    await expect(page.getByRole("region", { name: "Resource tile", exact: true })).toContainText("Gold once");
+    await expect(page.getByRole("region", { name: "Develop tile", exact: true })).toContainText("grow your city");
     await expect(page.getByRole("button", { name: "Assign Civilian", exact: true })).toHaveCount(0);
     const goldBefore = (await snapshot(page)).players[0].resources.gold;
     await page.getByRole("button", { name: "End Turn", exact: true }).click();

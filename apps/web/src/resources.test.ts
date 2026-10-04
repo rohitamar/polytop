@@ -3,7 +3,7 @@ import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { createGame, getCityResourceTiles, type Opportunity } from "@reach/game-core";
+import { createGame, type Opportunity } from "@reach/game-core";
 import { createResourceLayer } from "./resources";
 
 describe("batched resource nodes", () => {
@@ -14,8 +14,8 @@ describe("batched resource nodes", () => {
     const layer = createResourceLayer(scene, palette, tile => new Vector3(tile.x, 0, tile.y), (mesh, material) => { mesh.material = material; mesh.isPickable = false; });
     try {
       const state = createGame("fern-104", 8);
-      const tiles = getCityResourceTiles(state, "city-1");
-      const opportunities: Opportunity[] = ["orchard", "wheat", "fishery", "forest", "mine"];
+      const tiles = state.tiles.slice(0, 7);
+      const opportunities: Opportunity[] = ["orchard", "wheat", "fishery", "animal", "mine", "starfish"];
       for (let i = 0; i < opportunities.length; i++) tiles[i].resource = opportunities[i];
       const owner = state.cities[0].ownerId;
       state.cities[0].ownerId = null;

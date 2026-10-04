@@ -1,6 +1,6 @@
 # Core land units
 
-`packages/game-core/src/units.ts` owns unit stats, recruitment costs, technology requirements, population costs and abilities. Recruitment and city rewards use the same unit constructor. Existing Swordsman population cost remains two; other normal land recruits cost one population. The free Giant reward uses zero recruitment population and has no Gold price.
+`packages/game-core/src/units.ts` owns unit stats, recruitment costs, technology requirements, population costs and abilities. Recruitment and city rewards use the same unit constructor. Every unit occupies one support slot in its home city. The free Giant reward has no Gold price. City support capacity is its level plus one, independently from the population that grows the city.
 
 ## Actions and abilities
 
@@ -17,13 +17,13 @@ Dash, Escape, Fortify and Stiff are checked through `hasUnitAbility`. Fortify mu
 
 ## City reward
 
-Upgrading a Town Center to the existing maximum level (3) makes a single Giant reward available. `CLAIM_GIANT` validates ownership, active turn, enabled unit type and an empty passable city tile. An occupied city can be upgraded; the reward waits until its tile is cleared. Claiming is free, creates a unit that waits until the next owner turn, and consumes the reward permanently. Capturing the city preserves its reward status and never recreates a claimed reward.
+Growing a city to level 5 or higher offers a Giant or Park reward at every level. `CLAIM_GIANT` validates ownership, active turn, enabled unit type and an empty passable city tile. An occupied city can be upgraded; the reward waits until its tile is cleared. Claiming is free, creates a unit that waits until the next owner turn, and consumes that level's reward. A later level can award another Giant. Capturing the city preserves its reward status and never recreates a claimed reward.
 
 ## Simulations and synchronization
 
-Pass `rules` to `createGame` with `enabledUnitTypes` and `enabledUnitAbilities`. Omitting rules enables the full existing roster and all five abilities. Both legal-action generation and authoritative validation read these rules. Player views include a copy of the rules and the owner's action phases; enemy action phases are masked with the existing enemy turn data. Clients submit actions and cannot submit replacement unit state or enable abilities.
+Pass `rules` to `createGame` with `enabledUnitTypes` and `enabledUnitAbilities`. Omitting rules enables the full existing roster and all implemented abilities. Both legal-action generation and authoritative validation read these rules. Player views include a copy of the rules and the owner's action phases; enemy action phases are masked with the existing enemy turn data. Clients submit actions and cannot submit replacement unit state or enable abilities.
 
-Escape uses the same pathfinder, movement costs, roads, occupancy, terrain, Ports and fog exploration update as every other move. It adds no separate path validation or visibility channel. Ranged attacks use the existing Manhattan range and visibility checks. The current engine has no enemy zone-of-control rule; this change preserves the existing movement restrictions.
+Escape uses the same pathfinder, movement costs, roads, occupancy, terrain, Ports and fog exploration update as every other move. It adds no separate path validation or visibility channel. Ranged attacks use the existing Manhattan range and visibility checks. The current engine has no enemy zone-of-control rule; movement retains that existing restriction model.
 
 ## Verification
 

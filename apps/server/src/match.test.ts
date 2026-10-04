@@ -1,4 +1,4 @@
-import { createGame, getPlayerView, getTileVisibility, TileVisibility, getPlayerAction, updatePlayerExploration, type GameAction, getTechnologyCost, economy, getPlayerPopulation, getProduction, canUnitEnterTerrain, getTile, movementCost, positionKey, getTerritory, applyAction, getReachableTiles, getAttackTargets, type GameState } from "@reach/game-core";
+import { createGame, getPlayerView, getTileVisibility, TileVisibility, getPlayerAction, updatePlayerExploration, type GameAction, getTechnologyCost, getPlayerPopulation, getProduction, getHarvestReason, getImprovementReason, improvementDefinitions, getPortBuildingReason, getRoadBuildingReason, hasTechnology, canUnitEnterTerrain, getTile, movementCost, positionKey, getTerritory, applyAction, getReachableTiles, getAttackTargets, type GameState } from "@reach/game-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
@@ -82,7 +82,7 @@ describe("lobby WebSocket server", () => {
         state = updatePlayerExploration({ ...initial, exploration: undefined, activePlayerId: response.state.activePlayerId,
           players: initial.players.map((player, index) => ({ ...player, id: response.state.players[index].id, name: response.state.players[index].name })),
           units: initial.units.map(unit => ({ ...unit, ownerId: ids.get(unit.ownerId)! })),
-          cities: initial.cities.map(city => ({ ...city, ownerId: city.ownerId ? ids.get(city.ownerId)! : null })) });
+          cities: initial.cities.map(city => ({ ...city, ownerId: city.ownerId ? ids.get(city.ownerId)! : null, capitalOf: city.capitalOf ? ids.get(city.capitalOf) : undefined })) });
       }
       expect(response.state).toEqual(getPlayerView(state, state.players[i].id));
     }
@@ -101,6 +101,72 @@ describe("lobby WebSocket server", () => {
     expect(next.revision).toBe(state.revision + 1);
     return next;
   }
+  async function fund(clients: Awaited<ReturnType<typeof connect>>[], state: GameState, amount: number) {
+    const owner = state.activePlayerId;
+    while (state.players.find(player => player.id === owner)!.resources.gold < amount) {
+      do { state = await act(clients, state, { type: "END_TURN" }); } while (state.activePlayerId !== owner);
+    }
+    return state;
+  }
+  async function connectCity(clients: Awaited<ReturnType<typeof connect>>[], state: GameState, cityId: string) {
+    for (const technologyId of ["riding", "roads", "climbing"] as const) {
+      if (hasTechnology(state, state.activePlayerId, technologyId)) continue;
+      state = await fund(clients, state, getTechnologyCost(state, state.activePlayerId, technologyId));
+      state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId });
+    }
+    const target = state.cities.find(city => city.id === cityId)!;
+    const owner = state.activePlayerId;
+    for (let step = 0; step < 80; step++) {
+      const unit = state.units.find(unit => unit.id === "warrior-1")!;
+      if (getRoadBuildingReason(state, owner, unit) === null) state = await act(clients, state, { type: "BUILD_ROAD", to: { x: unit.x, y: unit.y } });
+      if (positionKey(unit) === positionKey(target)) return state;
+      const visited = new Set([positionKey(target)]), queue = [{ x: target.x, y: target.y, distance: 0 }], distances = new Map([[positionKey(target), 0]]);
+      while (queue.length) {
+        const current = queue.shift()!;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const tile = getTile(state, current.x + dx, current.y + dy);
+          if (!tile || visited.has(positionKey(tile)) || !canUnitEnterTerrain(state, owner, unit, tile.terrain) || state.units.some(other => other.ownerId !== owner && positionKey(other) === positionKey(tile))) continue;
+          visited.add(positionKey(tile)); distances.set(positionKey(tile), current.distance + 1); queue.push({ ...tile, distance: current.distance + 1 });
+        }
+      }
+      const destination = getReachableTiles(state, unit.id).sort((a, b) => (distances.get(positionKey(a)) ?? Infinity) - (distances.get(positionKey(b)) ?? Infinity))[0];
+      if (destination) {
+        for (const tile of destination.path) if (getRoadBuildingReason(state, owner, tile) === null) state = await act(clients, state, { type: "BUILD_ROAD", to: { x: tile.x, y: tile.y } });
+        state = await act(clients, state, { type: "move", unitId: unit.id, to: { x: destination.x, y: destination.y } });
+      }
+      do { state = await act(clients, state, { type: "END_TURN" }); } while (state.activePlayerId !== owner);
+      state = await fund(clients, state, 12);
+    }
+    throw new Error("City connection did not finish");
+  }
+  async function develop(clients: Awaited<ReturnType<typeof connect>>[], state: GameState, cityId: string, level: number) {
+    for (const technologyId of ["organization", "farming", "hunting", "forestry", "mathematics", "climbing", "mining", "smithery", "fishing"] as const) {
+      if (hasTechnology(state, state.activePlayerId, technologyId)) continue;
+      state = await fund(clients, state, getTechnologyCost(state, state.activePlayerId, technologyId));
+      state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId });
+    }
+    for (let iteration = 0; iteration < 100; iteration++) {
+      const city = state.cities.find(city => city.id === cityId)!;
+      if (city.townHallLevel >= level) return state;
+      if (city.rewardPending) {
+        const reward = city.townHallLevel === 2 ? "workshop" : city.townHallLevel === 3 ? "resources" : "borders";
+        state = await act(clients, state, { type: "CHOOSE_CITY_REWARD", cityId, reward }); continue;
+      }
+      state = await fund(clients, state, 7);
+      const tiles = state.tiles.filter(tile => getTerritory(state).find(claim => positionKey(claim) === positionKey(tile))?.cityId === cityId);
+      const harvest = tiles.find(tile => getHarvestReason(state, state.activePlayerId, tile) === null);
+      if (harvest) { state = await act(clients, state, { type: "HARVEST_RESOURCE", to: { x: harvest.x, y: harvest.y } }); continue; }
+      let built = false;
+      for (const improvement of Object.keys(improvementDefinitions)) {
+        const tile = tiles.find(tile => getImprovementReason(state, state.activePlayerId, tile, improvement) === null);
+        if (tile) { state = await act(clients, state, { type: "BUILD_IMPROVEMENT", to: { x: tile.x, y: tile.y }, improvement }); built = true; break; }
+      }
+      if (!built) { const port = tiles.find(tile => getPortBuildingReason(state, state.activePlayerId, tile) === null); if (port) { state = await act(clients, state, { type: "BUILD_PORT", to: { x: port.x, y: port.y } }); continue; }
+        throw new Error(`No development available for ${cityId} at ${city.townHallLevel}: ${JSON.stringify(tiles)}`); }
+    }
+    throw new Error("City progression did not finish");
+  }
+
 
 
   it("withholds the map seed, hidden enemies and other players' exploration", async () => {
@@ -141,9 +207,9 @@ describe("lobby WebSocket server", () => {
   it("synchronizes automatic Gold and population for eight clients", async () => {
     const { clients, state: initial } = await match(8);
     let state = initial;
-    expect(getPlayerPopulation(state, state.players[0].id)).toEqual({ used: 1, capacity: 3, available: 2 });
+    expect(getPlayerPopulation(state, state.players[0].id)).toEqual({ used: 1, capacity: 2, available: 1 });
     const income = getProduction(state, state.players[0].id).gold;
-    expect(income).toBe(economy.goldIncome[0]);
+    expect(income).toBe(2);
     for (let i = 0; i < 8; i++) state = await act(clients, state, { type: "END_TURN" });
     expect(state.players[0].resources).toEqual({ gold: initial.players[0].resources.gold + income });
     expect(state.tiles).toEqual(initial.tiles);
@@ -184,8 +250,8 @@ describe("lobby WebSocket server", () => {
     await reject(1, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" }, "turn");
     await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "unknown" }, "Unknown technology");
     await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "archery" }, "Requires Hunting");
-    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "farming" }, "not implemented");
-    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "hunting" }, "Not enough Gold");
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "farming" }, "Requires Organization");
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "smithery" }, "Requires Mining");
     for (const action of [
       { type: "UNLOCK_TECHNOLOGY", technologyId: "archery", playerId: state.players[1].id },
       { type: "UNLOCK_TECHNOLOGY", technologyId: "archery", goldCost: 0 },
@@ -208,12 +274,14 @@ describe("lobby WebSocket server", () => {
     const to = getReachableTiles(state, "warrior-1")[0];
     state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: to.x, y: to.y } });
     state = await act(clients, state, { type: "END_TURN" });
+    while (state.players[1].resources.gold < 11) { state = await act(clients, state, { type: "END_TURN" }); state = await act(clients, state, { type: "END_TURN" }); }
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "riding" });
     const guestGold = state.players[1].resources.gold;
     state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" });
-    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["roads"]]);
+    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["riding", "roads"]]);
     expect(state.players[1].resources.gold).toBe(guestGold - 6);
     state = await act(clients, state, { type: "END_TURN" });
-    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["roads"]]);
+    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["riding", "roads"]]);
     expect(state.units[0].movement).toBe(state.units[0].maxMovement);
   });
 
@@ -253,7 +321,7 @@ describe("lobby WebSocket server", () => {
     expect(getTerritory(state).filter(tile => tile.cityId === "neutral-1")).toEqual(neutralTerritory.map(tile => ({ ...tile, playerId: state.players[0].id })));
     expect(state.cities.find(city => city.id === "neutral-1")!.ownerId).toBe(state.players[0].id);
     for (let i = 0; i < 12; i++) state = await act(clients, state, { type: "END_TURN" });
-    state = await act(clients, state, { type: "UPGRADE_TOWN_HALL", cityId: "city-1" });
+    state = await develop(clients, state, "city-1", 2);
     expect(state.cities[0].townHallLevel).toBe(2);
     state = await act(clients, state, { type: "END_TURN" });
     expect(state.activePlayerId).toBe(state.players[1].id);
@@ -380,8 +448,9 @@ describe("lobby WebSocket server", () => {
     const { clients, state: initial } = await match();
     let state = await act(clients, initial, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
     for (let i = 0; i < 12; i++) state = await act(clients, state, { type: "END_TURN" });
-    state = await act(clients, state, { type: "UPGRADE_TOWN_HALL", cityId: "city-1" });
-    state = await act(clients, state, { type: "UPGRADE_TOWN_HALL", cityId: "city-1" });
+    state = await connectCity(clients, state, "neutral-2");
+    state = await develop(clients, state, "city-1", 5);
+    state = await act(clients, state, { type: "CHOOSE_CITY_REWARD", cityId: "city-1", reward: "giant" });
     const gold = state.players[0].resources.gold;
     state = await act(clients, state, { type: "CLAIM_GIANT", cityId: "city-1" });
     expect(state.units.at(-1)).toMatchObject({ unitType: "giant", hp: 40 });
@@ -418,30 +487,23 @@ describe("lobby WebSocket server", () => {
     newcomer.send({ type: "JOIN_ROOM", name: "Late", code: first.code });
     expect((await newcomer.next()).type).toBe("LOBBY_ERROR");
   });
-  it("collects a resource for all clients once despite stale and duplicate movement requests", async () => {
-    const { clients, state: matchState } = await match();
-    let state = matchState;
-    const request = { type: "GAME_ACTION", requestId: "collect-once", expectedRevision: state.revision, action: { type: "move", unitId: "warrior-1", to: { x: 4, y: 3 } } };
-    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 4, y: 4 } });
-    state = await act(clients, state, { type: "END_TURN" });
-    state = await act(clients, state, { type: "END_TURN" });
+  it("harvests population once despite stale and duplicate requests and synchronizes owner views", async () => {
+    const { clients, state: initial } = await match();
+    let state = await act(clients, initial, { type: "UNLOCK_TECHNOLOGY", technologyId: "organization" });
+    state = await fund(clients, state, 2);
+    const tile = state.tiles.find(tile => getHarvestReason(state, state.activePlayerId, tile) === null)!;
     const before = structuredClone(state);
-    request.expectedRevision = state.revision;
-    clients[0].send(request);
-    clients[0].send(request);
-    const response = await clients[0].next();
-    if (response.type !== "MATCH_STATE") throw new Error("Expected collection");
-    const enemyResponse = await clients[1].next();
-    expect(enemyResponse).toMatchObject({ type: "MATCH_STATE", state: { perspectiveId: state.players[1].id, revision: response.state.revision } });
+    const action = { type: "HARVEST_RESOURCE", to: { x: tile.x, y: tile.y } };
+    const request = { type: "GAME_ACTION", requestId: "harvest-once", expectedRevision: state.revision, action };
+    clients[0].send(request); clients[0].send(request);
+    state = applyAction(state, { ...action, type: "HARVEST_RESOURCE", playerId: state.activePlayerId });
+    for (let i = 0; i < clients.length; i++) { const response = await clients[i].next(); if (response.type !== "MATCH_STATE") throw new Error("Expected harvest state"); expect(response.state).toEqual(getPlayerView(state, state.players[i].id)); }
     expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
-    expect(response.state.players[0].resources.gold).toBe(before.players[0].resources.gold + 2);
-    expect(response.state.players[1].resources).toEqual({ gold: 0 });
-    expect(response.state.tiles.find(tile => tile.x === 4 && tile.y === 3)!.resource).toBeUndefined();
-    clients[0].send({ ...request, requestId: "stale-collection" });
-    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "State changed. Try again." });
-    state = applyAction(before, { type: "move", playerId: before.activePlayerId, unitId: "warrior-1", to: { x: 4, y: 3 } });
-    expect(response.state).toEqual(getPlayerView(state, state.players[0].id));
-    state = await act(clients, state, { type: "END_TURN" });
+    expect(state.players[0].resources.gold).toBe(before.players[0].resources.gold - 2);
+    expect(state.cities.reduce((sum, city) => sum + (city.population ?? 0), 0)).toBe(1);
+    clients[0].send({ ...request, requestId: "stale-harvest" });
+    expect((await clients[0].next()).type).toBe("ACTION_REJECTED");
+    await act(clients, state, { type: "END_TURN" });
   });
 
   it("resumes stored technologies, depleted resources and Gold without repaying income or allowing request replay", async () => {
@@ -555,8 +617,16 @@ describe("lobby WebSocket server", () => {
     state = await act(clients, state, { type: "END_TURN" });
     state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: water.x, y: water.y } });
     const sailor = state.units[0];
-    expect(sailor).toMatchObject({ unitType: "warrior", embarked: true, movement: 0, hasAttacked: true });
+    expect(sailor).toMatchObject({ unitType: "raft", carriedUnitType: "warrior", embarked: true, movement: 0, hasAttacked: true });
     expect(getPlayerPopulation(state, state.players[0].id).used).toBe(1);
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await fund(clients, state, getTechnologyCost(state, state.activePlayerId, "sailing") + 5);
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "sailing" });
+    const upgradeGold = state.players[0].resources.gold;
+    state = await act(clients, state, { type: "UPGRADE_NAVAL", unitId: sailor.id, unitType: "scout" });
+    expect(state.units[0]).toMatchObject({ unitType: "scout", carriedUnitType: "warrior", hp: 10, actionPhase: "complete" });
+    expect(state.players[0].resources.gold).toBe(upgradeGold - 5);
     state = await act(clients, state, { type: "END_TURN" });
     state = await act(clients, state, { type: "END_TURN" });
     const waterDistances = (target: { x: number; y: number }) => {
@@ -598,11 +668,11 @@ describe("lobby WebSocket server", () => {
       expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
       state = applyAction(state, { type: "move", playerId: state.activePlayerId, unitId: sailor.id, to: { x: fish.x, y: fish.y } });
       expect(response.state).toEqual(getPlayerView(state, state.players[0].id));
-      expect(state.players[0].resources.gold).toBe(gold + 2);
-      expect(getTile(state, fish.x, fish.y)?.resource).toBeUndefined();
+      expect(state.players[0].resources.gold).toBe(gold);
+      expect(getTile(state, fish.x, fish.y)?.resource).toBe("fishery");
       break;
     }
-    expect(getTile(state, fish.x, fish.y)?.resource).toBeUndefined();
+    expect(getTile(state, fish.x, fish.y)?.resource).toBe("fishery");
     const token = clients[0].session().token;
     await clients[0].close();
     const resumed = await connect();
@@ -630,10 +700,11 @@ describe("lobby WebSocket server", () => {
     expect(getTechnologyCost(state, state.players[0].id, "roads")).toBe(8);
     clients[0].send({ type: "GAME_ACTION", requestId: "locked-road", expectedRevision: state.revision, action: { type: "BUILD_ROAD", to: { x: 4, y: 4 } } });
     expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Requires Roads" });
-    while (state.players[0].resources.gold < 14) {
+    while (state.players[0].resources.gold < 20) {
       state = await act(clients, state, { type: "END_TURN" });
       state = await act(clients, state, { type: "END_TURN" });
     }
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "riding" });
     const gold = state.players[0].resources.gold;
     state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" });
     expect(state.players[0].resources.gold).toBe(gold - 8);

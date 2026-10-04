@@ -1,42 +1,23 @@
 import { expect, test } from "@playwright/test";
-import "../apps/web/src/debug";
+import { snapshot, tile, round, develop } from "./development-helpers";
 
-test("automatic Gold income and Town Hall capacity use real city controls", async ({ page }, testInfo) => {
-  await page.goto("/");
-  await page.waitForFunction(() => !!window.__GAME_DEBUG__);
-  await page.evaluate(() => window.__GAME_DEBUG__!.setSeed("fern-104"));
-  const selectCity = async () => {
-    const point = await page.evaluate(() => window.__GAME_DEBUG__!.getUnitScreenPosition("warrior-1"));
-    await page.mouse.click(point.x, point.y);
-    await expect(page.getByTestId("population")).toBeVisible();
-  };
-  await selectCity();
+test("population levels cities and reward choices increase income and unit slots", async ({ page }, testInfo) => {
+  test.setTimeout(180000);
+  await page.goto("/"); await page.waitForFunction(() => !!window.__GAME_DEBUG__);
+  await tile(page, { x: 4, y: 5 });
+  await expect(page.getByTestId("population")).toHaveText("1 / 2");
+  await expect(page.getByTestId("town-hall")).toHaveText("Level 1");
+  const initial = await snapshot(page);
+  expect(initial.players[0].resources.gold).toBe(5);
+  await round(page);
+  expect((await snapshot(page)).players[0].resources.gold).toBe(7);
+  await develop(page, "city-1", 2);
+  await page.keyboard.press("Escape"); await tile(page, { x: 4, y: 5 });
   await expect(page.getByTestId("population")).toHaveText("1 / 3");
-  await expect(page.getByTestId("player-population")).toHaveText("1 / 3");
-  await expect(page.getByTestId("available-population")).toHaveText("2");
-  for (const resource of ["food", "wood", "steel"]) await expect(page.getByTestId(resource)).toHaveCount(0);
-  const initial = await page.evaluate(() => window.__GAME_DEBUG__!.getState());
-  const income = Number((await page.getByTestId("income").innerText()).match(/\d+/)![0]);
-  expect(initial.players[0].resources).toEqual({ gold: income });
-  await page.screenshot({ path: testInfo.outputPath("town-center-level-1.png") });
-  const turn = page.getByRole("button", { name: "End Turn", exact: true });
-  await turn.click();
-  expect((await page.evaluate(() => window.__GAME_DEBUG__!.getState())).players[0].resources.gold).toBe(0);
-  await turn.click();
-  await selectCity();
-  expect((await page.evaluate(() => window.__GAME_DEBUG__!.getState())).players[0].resources.gold).toBe(income * 2);
-  await page.getByRole("button", { name: "Upgrade Town Center" }).click();
-  await expect(page.getByTestId("population")).toHaveText("1 / 6");
-  await expect(page.getByTestId("player-population")).toHaveText("1 / 6");
-  await expect(page.getByTestId("town-hall")).toHaveText("2 / 3");
-  expect((await page.evaluate(() => window.__GAME_DEBUG__!.getState())).players[0].resources).toEqual({ gold: income * 2 - 4 });
-  await expect(page.getByTestId("income")).toHaveText(`+${income + 1}/turn`);
-  await expect(page.getByRole("button", { name: "Grow Population" })).toHaveCount(0);
-  await page.screenshot({ path: testInfo.outputPath("town-center-level-2.png") });
-  for (let round = 0; round < 3; round++) { await turn.click(); await turn.click(); }
-  await selectCity();
-  await page.getByRole("button", { name: "Upgrade Town Center" }).click();
-  await expect(page.getByTestId("town-hall")).toHaveText("3 / 3");
-  await expect(page.getByTestId("population")).toHaveText("1 / 9");
-  await page.screenshot({ path: testInfo.outputPath("town-center-level-3.png") });
+  await expect(page.getByTestId("town-hall")).toHaveText("Level 2");
+  const before = await snapshot(page);
+  await page.getByRole("button", { name: /^Workshop/ }).click();
+  expect((await snapshot(page)).players[0].resources.gold).toBe(before.players[0].resources.gold);
+  await expect(page.getByTestId("income")).toHaveText("+4/turn");
+  await page.screenshot({ path: testInfo.outputPath("population-city.png") });
 });

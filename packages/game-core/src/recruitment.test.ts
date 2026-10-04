@@ -27,7 +27,7 @@ describe("recruitment", () => {
     expect(next.revision).toBe(state.revision + 1);
     expect(next.players[0].resources.gold).toBe(10 - definition.goldCost!);
     expect(next.units.at(-1)).toMatchObject({ unitType: definition.id, x: 4, y: 5, homeCityId: "city-1", ownerId: "player-1", populationCost: definition.populationCost, hp: definition.maxHp, maxMovement: definition.maxMovement, attack: definition.attack, defense: definition.defense, range: definition.range, movement: 0, hasAttacked: true });
-    expect(getPlayerPopulation(next, "player-1")).toMatchObject({ used: 1 + definition.populationCost, capacity: 3, available: 2 - definition.populationCost });
+    expect(getPlayerPopulation(next, "player-1")).toMatchObject({ used: 1 + definition.populationCost, capacity: 2, available: 1 - definition.populationCost });
     expect(state).toEqual(before);
     expect(next.players[1]).toEqual(state.players[1]);
     expect(next.cities).toEqual(state.cities);
@@ -40,7 +40,7 @@ describe("recruitment", () => {
     ["neutral city", (s: GameState) => { s.cities[0].ownerId = null; }, "Not your city"],
     ["unknown city", (s: GameState) => { s.cities[0].id = "other"; }, "Not your city"],
     ["gold", (s: GameState) => { s.players[0].resources.gold = 1; }, "Not enough Gold"],
-    ["population", (s: GameState) => { s.units[0].populationCost = 5; }, "Insufficient population"],
+    ["population", (s: GameState) => { s.units.push({ ...s.units[0], id: "second" }); }, "City unit capacity reached"],
     ["occupied city", (s: GameState) => { s.units[0].x = 4; }, "City spawn tile"],
     ["water", (s: GameState) => { getTile(s, 4, 5)!.terrain = "water"; }, "City spawn tile"],
     ["mountain", (s: GameState) => { getTile(s, 4, 5)!.terrain = "mountain"; }, "City spawn tile"],
@@ -94,6 +94,6 @@ describe("recruitment", () => {
     state = end(state);
     state = applyAction(state, { type: "ATTACK_UNIT", playerId: "player-2", unitId: "warrior-2", targetId: id });
     expect(state.units.some(u => u.id === id)).toBe(false);
-    expect(getPlayerPopulation(state, "player-1")).toMatchObject({ used: 1, capacity: 0, available: -1 });
+    expect(getPlayerPopulation(state, "player-1")).toMatchObject({ used: 0, capacity: 0, available: 0 });
   });
 });
