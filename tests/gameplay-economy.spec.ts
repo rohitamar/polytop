@@ -65,8 +65,10 @@ test("Climbing and Mining enable independent mountain access and one-time Gold c
   await round(page);
   await round(page);
   await page.getByRole("button", { name: "Technologies", exact: true }).click();
-  await expect(page.getByRole("article", { name: "Mining", exact: true })).toContainText("Requires Climbing");
-  await page.getByRole("button", { name: "Unlock Climbing", exact: true }).click();
+  await page.getByRole("button", { name: /^Mining: / }).click();
+  await expect(page.getByRole("region", { name: "Technology details" })).toContainText("Requires Climbing");
+  await page.getByRole("button", { name: /^Climbing: / }).click();
+  await page.getByRole("button", { name: "Research Climbing", exact: true }).click();
   await page.getByRole("button", { name: "Close technologies" }).click();
   await move(page, "warrior-1", { x: 3, y: 5 });
   await round(page);
@@ -81,11 +83,13 @@ test("Climbing and Mining enable independent mountain access and one-time Gold c
   while ((await snapshot(page)).players[0].resources.gold < getTechnologyCost(await snapshot(page), "player-1", "mining")) await round(page);
   const before = await snapshot(page);
   await page.getByRole("button", { name: "Technologies", exact: true }).click();
-  await page.getByRole("button", { name: "Unlock Mining", exact: true }).click();
+  await page.getByRole("button", { name: /^Mining: / }).click();
+  await page.getByRole("button", { name: "Research Mining", exact: true }).click();
   const next = await snapshot(page);
   expect(getTile(next, target.x, target.y)!.resource).toBeUndefined();
   expect(next.players[0].resources.gold).toBe(before.players[0].resources.gold - getTechnologyCost(before, "player-1", "mining") + 3);
   expect(next.players[1].technologies).toEqual([]);
+  await page.getByRole("button", { name: "Close technologies" }).click();
   await expect(page.getByRole("status")).toContainText("+3 Gold");
   await page.screenshot({ path: testInfo.outputPath("mining-collection.png") });
 });
@@ -100,7 +104,8 @@ test("Fishing builds Ports and existing units embark, sail and land", async ({ p
   await travel(page, "warrior-1", city, canonical.tiles);
   while ((await snapshot(page)).players[0].resources.gold < getTechnologyCost(await snapshot(page), "player-1", "fishing") + 7) await round(page);
   await page.getByRole("button", { name: "Technologies", exact: true }).click();
-  await page.getByRole("button", { name: "Unlock Fishing", exact: true }).click();
+  await page.getByRole("button", { name: /^Fishing: / }).click();
+  await page.getByRole("button", { name: "Research Fishing", exact: true }).click();
   await page.getByRole("button", { name: "Close technologies" }).click();
   state = await snapshot(page);
   const water = state.tiles.find(tile => tile.terrain === "water" && gridDistance(tile, city) === 1)!;
@@ -170,7 +175,8 @@ test("resource depletion and technology ownership survive multiplayer reload wit
     expect((await snapshot(page)).players[1].resources).toEqual(before.players[1].resources);
     expect(getTile(await snapshot(guest), 4, 3)?.resource).toBeUndefined();
     await page.getByRole("button", { name: "Technologies", exact: true }).click();
-    await page.getByRole("button", { name: "Unlock Climbing", exact: true }).click();
+    await page.getByRole("button", { name: /^Climbing: / }).click();
+    await page.getByRole("button", { name: "Research Climbing", exact: true }).click();
     await settled(page, 5);
     await settled(guest, 5);
     const saved = await snapshot(page);
@@ -182,7 +188,8 @@ test("resource depletion and technology ownership survive multiplayer reload wit
     expect(await snapshot(page)).toEqual(saved);
     expect((await snapshot(guest)).revision).toBe(saved.revision);
     await page.getByRole("button", { name: "Technologies", exact: true }).click();
-    await expect(page.getByRole("article", { name: "Climbing", exact: true })).toContainText("Unlocked");
+    await expect(page.getByRole("button", { name: "Climbing: Researched", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Close technologies" }).click();
     await page.getByRole("button", { name: "End Turn", exact: true }).click();
     await settled(guest, 6);
     expect((await snapshot(guest)).players[0].resources.gold).toBe(0);
@@ -198,7 +205,8 @@ test("Port construction fits a narrow viewport", async ({ page }, testInfo) => {
   await round(page);
   await round(page);
   await page.getByRole("button", { name: "Technologies", exact: true }).click();
-  await page.getByRole("button", { name: "Unlock Fishing", exact: true }).click();
+  await page.getByRole("button", { name: /^Fishing: / }).click();
+  await page.getByRole("button", { name: "Research Fishing", exact: true }).click();
   await page.getByRole("button", { name: "Close technologies" }).click();
   await page.getByRole("button", { name: "Build Ports", exact: true }).click();
   const panel = page.getByRole("region", { name: "Build Port", exact: true });

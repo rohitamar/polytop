@@ -4,7 +4,7 @@ import { getUnitDefinition, getUnitStats, type UnitType } from "./units";
 import { computeVisibleTiles, isTileVisible, updatePlayerExploration, type PlayerExploration } from "./fog";
 export { TileVisibility, visionRules, tilesInRange, computeVisibleTiles, updatePlayerExploration, getTileVisibility, isTileVisible, isTileExplored, getPlayerView, getPlayerAction, type PlayerView, type PlayerExploration } from "./fog";
 export { unitDefinitions, getUnitDefinition, type UnitType, type UnitDefinition } from "./units";
-export { technologies, technologyPrerequisites, getTechnology, getTechnologyCost, hasTechnology, canUnlockTechnology, getTechnologyUnlockReason, type TechnologyId } from "./technologies";
+export { technologies, getTechnology, getTechnologyCost, hasTechnology, canUnlockTechnology, getTechnologyUnlockReason, type TechnologyId, type TechnologyDefinition, type TechEffect } from "./technologies";
 export { getMapSize, mapSizes, terrainRules, resourceRules, type WorldConfig } from "./world";
 export type Terrain = "grass" | "forest" | "mountain" | "water";
 export type Position = { x: number; y: number };
@@ -460,7 +460,7 @@ export function getRecruitmentReason(state: GameState, playerId: string, cityId:
   const definition = getUnitDefinition(unitType);
   if (!definition) return "Unknown unit type";
   if (definition.domain === "naval") return "Build a Port and move a land unit onto it";
-  if (definition.requiredTechnology && !player.technologies.includes(definition.requiredTechnology)) return `Requires ${getTechnology(definition.requiredTechnology)!.name}`;
+  if (definition.requiredTechnology && !hasTechnology(state, playerId, definition.requiredTechnology)) return `Requires ${getTechnology(definition.requiredTechnology)!.name}`;
   if (player.resources.gold < definition.goldCost) return "Not enough Gold";
   if (getPlayerPopulation(state, playerId).available < definition.populationCost) return "Insufficient population";
   if (!getRecruitSpawn(state, cityId, definition.id as UnitType)) return "City spawn tile must be empty and passable";
@@ -543,10 +543,11 @@ function transition(state: GameState, action: GameAction): GameState {
         technologies: [...player.technologies, technology.id],
       } : player),
     };
-    if (technology.id === "mining") {
+    const collectionEffects = technology.effects.filter(effect => effect.type === "collect-resource");
+    if (collectionEffects.length) {
       for (const unit of next.units.filter(unit => unit.ownerId === action.playerId)) {
         const resource = getTile(next, unit.x, unit.y)?.resource;
-        if (resource && resourceDefinitions[resource].requiredTechnology === technology.id) next = collectResource(next, unit, unit);
+        if (resource && collectionEffects.some(effect => effect.resource === resource)) next = collectResource(next, unit, unit);
       }
     }
     return next;

@@ -37,6 +37,7 @@ describe("playtest integration baseline", () => {
 
   it("recalculates price after ownership gains and losses and rejects insufficient funds atomically", () => {
     const state = fixture();
+    state.players[0].technologies.push("hunting");
     expect(getTechnologyCost(state, "player-1", "archery")).toBe(6);
     state.cities[1].ownerId = "player-1";
     expect(getTechnologyCost(state, "player-1", "archery")).toBe(8);

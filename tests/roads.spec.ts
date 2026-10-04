@@ -46,8 +46,9 @@ test("road controls build shared infrastructure, reject invalid tiles and recove
     await round();
     await round();
     await page.getByRole("button", { name: "Technologies", exact: true }).click();
-    await expect(page.getByRole("article", { name: "Roads", exact: true })).toContainText("Tier 2 · 6 Gold");
-    await page.getByRole("button", { name: "Unlock Roads", exact: true }).click();
+    await page.getByRole("button", { name: /^Roads: / }).click();
+    await expect(page.getByRole("region", { name: "Technology details" })).toContainText("Tier 2 · Cost: 6 Gold");
+    await page.getByRole("button", { name: "Research Roads", exact: true }).click();
     await settled(9);
     await page.getByRole("button", { name: "Close technologies" }).click();
     await page.getByRole("button", { name: "Build Roads", exact: true }).click();
@@ -97,7 +98,8 @@ test("road placement controls fit a narrow viewport", async ({ page }, testInfo)
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
   for (let i = 0; i < 4; i++) await page.getByRole("button", { name: "End Turn", exact: true }).click();
   await page.getByRole("button", { name: "Technologies", exact: true }).click();
-  await page.getByRole("button", { name: "Unlock Roads", exact: true }).click();
+  await page.getByRole("button", { name: /^Roads: / }).click();
+  await page.getByRole("button", { name: "Research Roads", exact: true }).click();
   await page.getByRole("button", { name: "Close technologies" }).click();
   await page.getByRole("button", { name: "Build Roads", exact: true }).click();
   const panel = page.getByRole("region", { name: "Build Road", exact: true });

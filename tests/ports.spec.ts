@@ -21,7 +21,8 @@ test("starting territory provides highlighted Port sites and permits embarkation
   const home = initial.cities.find(city => city.id === initial.units[0].homeCityId)!;
   for (let i = 0; i < 5; i++) await round(page);
   await page.getByRole("button", { name: "Technologies", exact: true }).click();
-  await page.getByRole("button", { name: "Unlock Fishing", exact: true }).click();
+  await page.getByRole("button", { name: /^Fishing: / }).click();
+  await page.getByRole("button", { name: "Research Fishing", exact: true }).click();
   await page.getByRole("button", { name: "Close technologies" }).click();
   await page.getByRole("button", { name: "Build Ports", exact: true }).click();
   let state = await snapshot(page);

@@ -50,18 +50,26 @@ test("recruits through synchronized city controls and activates on the next owne
     await settle(6);
     await guest.getByRole("button", { name: "End Turn", exact: true }).click();
     await settle(7);
+    for (let revision = 8; revision <= 11; revision++) {
+      await (revision % 2 === 0 ? page : guest).getByRole("button", { name: "End Turn", exact: true }).click();
+      await settle(revision);
+    }
     await tile(page, 4, 5);
     await page.getByRole("button", { name: "Recruit units", exact: true }).click();
     const panel = page.getByRole("region", { name: "Recruit units", exact: true });
     await expect(panel.getByRole("article", { name: "Archer", exact: true })).toContainText("Requires Archery");
     await expect(panel.getByRole("button", { name: "Recruit Archer", exact: true })).toBeDisabled();
     await page.getByRole("button", { name: "Technologies", exact: true }).click();
-    await page.getByRole("button", { name: "Unlock Archery", exact: true }).click();
-    await settle(8);
+    await page.getByRole("button", { name: /^Hunting: / }).click();
+    await page.getByRole("button", { name: "Research Hunting", exact: true }).click();
+    await settle(12);
+    await page.getByRole("button", { name: /^Archery: / }).click();
+    await page.getByRole("button", { name: "Research Archery", exact: true }).click();
+    await settle(13);
     await page.getByRole("button", { name: "Close technologies" }).click();
     await expect(panel.getByRole("button", { name: "Recruit Archer", exact: true })).toBeEnabled();
     await panel.getByRole("button", { name: "Recruit Archer", exact: true }).click();
-    await settle(9);
+    await settle(14);
     const state = await snapshot(page);
     const recruit = state.units.at(-1)!;
     expect(recruit).toMatchObject({ unitType: "archer", x: 4, y: 5, movement: 0, hasAttacked: true, homeCityId: "city-1" });
@@ -74,12 +82,12 @@ test("recruits through synchronized city controls and activates on the next owne
     expect((await snapshot(page)).units.at(-1)?.unitType).toBe("archer");
     await page.screenshot({ path: testInfo.outputPath("recruited-archer.png") });
     await page.getByRole("button", { name: "End Turn", exact: true }).click();
-    await settle(10);
+    await settle(15);
     await guest.getByRole("button", { name: "End Turn", exact: true }).click();
-    await settle(11);
+    await settle(16);
     await unit(page, recruit.id);
     await tile(page, 3, 5);
-    await settle(12);
+    await settle(17);
     expect((await snapshot(page)).units.find(u => u.id === recruit.id)).toMatchObject({ x: 3, y: 5, movement: 0, hasAttacked: false });
   } finally {
     await context.close();

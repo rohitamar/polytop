@@ -183,6 +183,9 @@ describe("lobby WebSocket server", () => {
     };
     await reject(1, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" }, "turn");
     await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "unknown" }, "Unknown technology");
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "archery" }, "Requires Hunting");
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "farming" }, "not implemented");
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "hunting" }, "Not enough Gold");
     for (const action of [
       { type: "UNLOCK_TECHNOLOGY", technologyId: "archery", playerId: state.players[1].id },
       { type: "UNLOCK_TECHNOLOGY", technologyId: "archery", goldCost: 0 },
@@ -191,24 +194,26 @@ describe("lobby WebSocket server", () => {
       clients[0].send({ type: "GAME_ACTION", requestId: "spoof", expectedRevision: state.revision, action });
       expect((await clients[0].next()).type).toBe("LOBBY_ERROR");
     }
-    state = await act(clients, state, { type: "END_TURN" });
-    state = await act(clients, state, { type: "END_TURN" });
-    state = await act(clients, state, { type: "END_TURN" });
-    state = await act(clients, state, { type: "END_TURN" });
+    while (state.players[0].resources.gold < getTechnologyCost(state, state.players[0].id, "hunting") + getTechnologyCost(state, state.players[0].id, "archery")) {
+      state = await act(clients, state, { type: "END_TURN" });
+      state = await act(clients, state, { type: "END_TURN" });
+    }
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "hunting" });
     const goldBeforePurchase = state.players[0].resources.gold;
     state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "archery" });
     expect(state.players[0].resources.gold).toBe(goldBeforePurchase - 6);
-    expect(state.players.map(player => player.technologies)).toEqual([["archery"], []]);
-    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "archery" }, "Already unlocked");
+    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], []]);
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "archery" }, "Already researched");
     await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" }, "State changed", state.revision - 1);
     const to = getReachableTiles(state, "warrior-1")[0];
     state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: to.x, y: to.y } });
     state = await act(clients, state, { type: "END_TURN" });
+    const guestGold = state.players[1].resources.gold;
     state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" });
-    expect(state.players.map(player => player.technologies)).toEqual([["archery"], ["roads"]]);
-    expect(state.players[1].resources.gold).toBe(getProduction(state, state.players[1].id).gold * 3 - 6);
+    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["roads"]]);
+    expect(state.players[1].resources.gold).toBe(guestGold - 6);
     state = await act(clients, state, { type: "END_TURN" });
-    expect(state.players.map(player => player.technologies)).toEqual([["archery"], ["roads"]]);
+    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["roads"]]);
     expect(state.units[0].movement).toBe(state.units[0].maxMovement);
   });
 

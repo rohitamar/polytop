@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTechnologyCost, applyAction, canUnlockTechnology, createGame, getReachableTiles, getTechnologyUnlockReason, hasTechnology, technologies, technologyPrerequisites, type GameAction, type GameState } from "./index";
+import { getTechnologyCost, getTechnology, applyAction, canUnlockTechnology, createGame, getReachableTiles, getTechnologyUnlockReason, hasTechnology, technologies, type GameAction, type GameState } from "./index";
 
 const unlock = (state: GameState, technologyId: string, playerId = state.activePlayerId) =>
   applyAction(state, { type: "UNLOCK_TECHNOLOGY", playerId, technologyId } as GameAction);
@@ -11,10 +11,10 @@ describe("technologies", () => {
     for (const technology of technologies) expect(getTechnologyCost(createGame(), "player-1", technology.id)).toBeGreaterThan(0);
   });
 
-  it.each(technologies)("unlocks $name for only the acting player using only Gold, immutably", technology => {
+  it.each(technologies.filter(technology => technology.implemented))("unlocks $name for only the acting player using only Gold, immutably", technology => {
     const state = createGame();
     state.players[0].resources.gold = getTechnologyCost(createGame(), "player-1", technology.id) + 2;
-    state.players[0].technologies = [...(technologyPrerequisites[technology.id] ?? [])];
+    state.players[0].technologies = [...technology.prerequisites];
     const before = structuredClone(state);
     expect(canUnlockTechnology(state, "player-1", technology.id)).toBe(true);
     const next = unlock(state, technology.id);
@@ -32,10 +32,10 @@ describe("technologies", () => {
     state.players[0].resources.gold = 0;
     const before = structuredClone(state);
     for (const [playerId, technologyId, reason] of [
-      ["player-1", "archery", "Not enough Gold"],
+      ["player-1", "fishing", "Not enough Gold"],
       ["player-1", "missing", "Unknown technology"],
-      ["player-2", "farming", "Not your turn"],
-      ["missing", "farming", "Not your turn"],
+      ["player-2", "fishing", "Not your turn"],
+      ["missing", "fishing", "Not your turn"],
     ]) {
       expect(canUnlockTechnology(state, playerId, technologyId)).toBe(false);
       expect(getTechnologyUnlockReason(state, playerId, technologyId)).toContain(reason);
@@ -46,11 +46,12 @@ describe("technologies", () => {
 
   it("rejects duplicate purchases and preserves distinct unlocks through movement and income", () => {
     let state = end(end(createGame("fern-104", 2, { scenario: "demo" })));
-    state.players[0].resources.gold = 10;
+    state.players[0].resources.gold = 20;
+    state = unlock(state, "hunting");
     state = unlock(state, "archery");
     const before = structuredClone(state);
     expect(canUnlockTechnology(state, "player-1", "archery")).toBe(false);
-    expect(() => unlock(state, "archery")).toThrow("Already unlocked");
+    expect(() => unlock(state, "archery")).toThrow("Already researched");
     expect(state).toEqual(before);
     const to = getReachableTiles(state, "warrior-1")[0];
     state = applyAction(state, { type: "move", playerId: "player-1", unitId: "warrior-1", to });
@@ -58,8 +59,44 @@ describe("technologies", () => {
     state.players[1].resources.gold = 10;
     state = unlock(state, "roads");
     state = end(state);
-    expect(state.players.map(player => player.technologies)).toEqual([["archery"], ["roads"]]);
+    expect(state.players.map(player => player.technologies)).toEqual([["hunting", "archery"], ["roads"]]);
     expect(state.units[0].movement).toBe(state.units[0].maxMovement);
     expect(hasTechnology(JSON.parse(JSON.stringify(state)), "player-1", "archery")).toBe(true);
+  });
+
+  it.each(technologies.filter(technology => technology.implemented && technology.prerequisites.length > 0))("requires every prerequisite of $name", technology => {
+    const state = createGame();
+    state.players[0].resources.gold = 100;
+    for (const missing of technology.prerequisites) {
+      state.players[0].technologies = technology.prerequisites.filter(id => id !== missing);
+      const before = structuredClone(state);
+      expect(() => unlock(state, technology.id)).toThrow(`Requires ${getTechnology(missing)!.name}`);
+      expect(state).toEqual(before);
+    }
+  });
+
+  it.each(technologies.filter(technology => !technology.implemented))("rejects unimplemented $name even with prerequisites and Gold", technology => {
+    const state = createGame();
+    state.players[0].technologies = [...technology.prerequisites];
+    state.players[0].resources.gold = 100;
+    const before = structuredClone(state);
+    expect(() => unlock(state, technology.id)).toThrow("not implemented");
+    expect(state).toEqual(before);
+  });
+
+  it("defines an acyclic tree with existing prerequisite IDs and preserves all research through JSON", () => {
+    const visit = (id: string, ancestors: string[] = []) => {
+      expect(ancestors).not.toContain(id);
+      const technology = getTechnology(id);
+      expect(technology).toBeDefined();
+      for (const prerequisite of technology!.prerequisites) visit(prerequisite, [...ancestors, id]);
+    };
+    for (const technology of technologies) visit(technology.id);
+    let state = createGame();
+    state.players[0].resources.gold = 100;
+    for (const technology of technologies.filter(technology => technology.implemented)) state = unlock(state, technology.id);
+    const restored = JSON.parse(JSON.stringify(state)) as GameState;
+    expect(restored).toEqual(state);
+    for (const id of state.players[0].technologies) expect(hasTechnology(restored, "player-1", id)).toBe(true);
   });
 });

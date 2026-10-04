@@ -38,7 +38,7 @@ import { createWorld, type World } from "./world";
 import { opportunityNames } from "./resources";
 import { playerStyle } from "./player-style";
 import { Lobby } from "./lobby";
-import { TechnologyPanel } from "./technology-panel";
+import { TechnologyModal } from "./technology-modal";
 import "./debug";
 import "./style.css";
 
@@ -586,7 +586,7 @@ function App() {
         <button className="worker-action" disabled={moving || waiting || !canAct || roadReason !== null} onClick={() => roadTile && cityAction({ type: "BUILD_ROAD", playerId: treasuryPlayer.id, to: roadTile })}>Build Road · {roadRules.goldCost} Gold</button>
         {roadReason && <small>{roadReason}</small>}
       </section>}
-      {showTechnologies && <TechnologyPanel state={state} playerId={treasuryPlayer.id}
+      {showTechnologies && <TechnologyModal state={state} playerId={treasuryPlayer.id}
         blockedReason={!connected ? "Match disconnected" : waiting ? "Waiting for server" : moving ? "Action in progress" : null}
         onUnlock={unlockTechnology} onClose={() => setShowTechnologies(false)} />}
       <aside className="expedition-card" aria-label="Current player">
