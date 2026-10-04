@@ -150,7 +150,7 @@ function App() {
         ? `${next.players.find(player => player.id === message.action!.playerId)!.name} unlocked ${getTechnology(message.action.technologyId)!.name}.`
         : message.action?.type === "BUILD_PORT" ? `Port built for ${portRules.goldCost} Gold.` : message.action?.type === "BUILD_ROAD" ? `Road built for ${roadRules.goldCost} Gold.`
         : message.action?.type === "RECRUIT_UNIT" ? `${getUnitDefinition(message.action.unitType)!.name} recruited. Ready on your next turn.`
-        : `${next.players.find(player => player.id === next.activePlayerId)!.name}'s turn.`));
+        : ""));
     }).catch(error => {
       busy.current = false;
       setMoving(false);
@@ -180,9 +180,7 @@ function App() {
   const [target, setTarget] = useState<string | null>(null);
   const targetRef = useRef<string | null>(null);
   const [moving, setMoving] = useState(false);
-  const [notice, setNotice] = useState(
-    "Every expedition begins with a single step.",
-  );
+  const [notice, setNotice] = useState("");
   const [failed, setFailed] = useState(false);
   const [help, setHelp] = useState(false);
   const [showTechnologies, setShowTechnologies] = useState(false);
@@ -241,7 +239,7 @@ function App() {
     select(null);
     world.current?.rebuild(stateRef.current);
     world.current?.update(stateRef.current, null);
-    setNotice("A fresh beginning. Select your warrior to explore.");
+    setNotice("");
   };
   const endTurn = () => {
     if (busy.current) return;
@@ -253,10 +251,7 @@ function App() {
     stateRef.current = next;
     setState(next);
     select(null);
-    const player = next.players.find(
-      (player) => player.id === next.activePlayerId,
-    )!;
-    setNotice(`${player.name}'s turn. Select your unit to move.`);
+    setNotice("");
   };
 
   const cityAction = (action: GameAction) => {
@@ -603,8 +598,7 @@ function App() {
         <div className="player-line">
           <span className="player-avatar" style={{ background: playerStyle(activePlayerIndex).accent }}>{activePlayer.name[0]}</span>
           <div>
-            <strong data-testid="active-player">The {activePlayer.name} Company</strong>
-            <small>Player {activePlayerIndex + 1} · {networked ? canAct ? "Your turn" : "Waiting for your turn" : "Local pass-and-play"}</small>
+            <strong data-testid="active-player">{activePlayer.name}'s turn</strong>
           </div>
         </div>
         <div className="turn-summary">{activeUnits.length} unit{activeUnits.length === 1 ? "" : "s"} · {availableMovement}/{maximumMovement} movement</div>
@@ -691,10 +685,10 @@ function App() {
           <p>Select an owned city to recruit.</p>
         </section>
       )}
-      <div className="bottom-status" role="status">
+      {notice && <div className="bottom-status" role="status">
         <span />
         {notice}
-      </div>
+      </div>}
       <button
         className="restart"
         onClick={endTurn}

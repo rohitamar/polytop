@@ -28,7 +28,7 @@ test("two owners move on their turns, reject enemy control and regain movement",
   await page.goto("/");
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
   await expect(page.getByTestId("active-player")).toHaveText(
-    "The Sunward Company",
+    "Sunward's turn",
   );
   expect(
     await page.evaluate(() => window.__GAME_DEBUG__!.getActivePlayer().id),
@@ -73,7 +73,7 @@ test("two owners move on their turns, reject enemy control and regain movement",
 
   await page.getByRole("button", { name: "End Turn", exact: true }).click();
   await expect(page.getByTestId("active-player")).toHaveText(
-    "The Tideward Company",
+    "Tideward's turn",
   );
   await expect(page.getByTestId("turn-number")).toHaveText("2");
   const second = await page.evaluate(() => window.__GAME_DEBUG__!.getState());
