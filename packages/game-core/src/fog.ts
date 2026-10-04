@@ -1,4 +1,4 @@
-import { getTerritory, gridDistance, positionKey, type City, type GameAction, type GameState, type Position, type Tile, type TileTerritory } from "./index";
+import { getTerritory, gridDistance, positionKey, type City, type GameAction, type GameState, type Position, type Tile, type TileTerritory, type Unit } from "./index";
 import { getUnitDefinition } from "./units";
 
 export enum TileVisibility {
@@ -13,6 +13,7 @@ export type PlayerExploration = {
   tiles: Record<string, Tile>;
   cities: Record<string, City>;
   territory: Record<string, TileTerritory>;
+  units?: Record<string, Unit>;
 };
 
 export type PlayerView = GameState & { perspectiveId: string };
@@ -44,6 +45,7 @@ export function updatePlayerExploration(state: GameState): GameState {
   const exploration: Record<string, PlayerExploration> = {};
   const tileIndex = new Map(state.tiles.map(tile => [positionKey(tile), tile]));
   const cityIndex = new Map(state.cities.map(city => [positionKey(city), city]));
+  const unitIndex = new Map(state.units.map(unit => [unit.id, unit]));
   const territory = new Map(getTerritory(state).map(claim => [positionKey(claim), claim]));
   for (const player of state.players) {
     const previous = state.exploration?.[player.id];
@@ -51,6 +53,14 @@ export function updatePlayerExploration(state: GameState): GameState {
     const tiles = { ...previous?.tiles };
     const cities = { ...previous?.cities };
     const claims = { ...previous?.territory };
+    const units = { ...previous?.units };
+    for (const [id, sighting] of Object.entries(units)) {
+      const current = unitIndex.get(id);
+      if (!current || current.ownerId === player.id || positionKey(current) !== positionKey(sighting)) delete units[id];
+    }
+    for (const unit of state.units) {
+      if (unit.ownerId !== player.id && visible.has(positionKey(unit))) units[unit.id] = { ...unit, homeCityId: null, movement: 0, hasAttacked: false };
+    }
     for (const key of visible) {
       const tile = tileIndex.get(key);
       if (tile) tiles[key] = { ...tile };
@@ -63,7 +73,7 @@ export function updatePlayerExploration(state: GameState): GameState {
     exploration[player.id] = {
       visibleTiles: [...visible],
       exploredTiles: [...new Set([...(previous?.exploredTiles ?? []), ...visible])],
-      tiles, cities, territory: claims,
+      tiles, cities, territory: claims, units,
     };
   }
   return { ...state, exploration };
@@ -95,6 +105,7 @@ export function getPlayerView(state: GameState, playerId: string): PlayerView {
     tiles: Object.values(memory.tiles).map(tile => ({ ...tile })).sort((a, b) => a.y - b.y || a.x - b.x),
     cities: Object.values(memory.cities).map(city => ({ ...city })),
     units: state.units.filter(unit => unit.ownerId === playerId || visible.has(positionKey(unit))).map(unit => unit.ownerId === playerId ? { ...unit } : { ...unit, homeCityId: null, movement: 0, hasAttacked: false }),
+    rememberedUnits: Object.values(memory.units ?? {}).filter(unit => !visible.has(positionKey(unit))).map(unit => ({ ...unit })),
     exploration: { [playerId]: structuredClone(memory) },
     rememberedTerritory: Object.values(memory.territory).map(claim => ({ ...claim })),
   };

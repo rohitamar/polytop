@@ -5,6 +5,7 @@ import {
   applyAction,
   getPlayerView,
   isTileVisible,
+  isTileExplored,
   economy,
   resourceDefinitions,
   getRoadBuildingReason,
@@ -321,7 +322,10 @@ function App() {
         setNotice(`Review the tile, then build a road for ${roadRules.goldCost} Gold.`);
         return;
       }
-      if (!visible && !selection.current) { setNotice("Explore this tile to discover it."); return; }
+      if (!visible && !selection.current) {
+        setNotice(isTileExplored(current, current.perspectiveId!, position) ? "Previously explored. Move closer for current vision." : "Explore this tile to discover it.");
+        return;
+      }
       const resource = getTile(current, position.x, position.y);
       if (!selection.current && resource?.resource && !current.units.some(unit => positionKey(unit) === positionKey(position)) && !current.cities.some(city => positionKey(city) === positionKey(position))) {
         if (!citySelection.current) setCitySelection(getTileTerritory(current, position.x, position.y)?.cityId ?? null);

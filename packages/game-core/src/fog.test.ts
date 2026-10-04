@@ -61,6 +61,56 @@ describe("fog of war", () => {
     expect(getPlayerView(left, "p1").units.map(unit => unit.id)).toEqual(["u1"]);
   });
 
+  it("keeps enemy visibility asymmetric after contact, turn changes and serialization", () => {
+    const initial = fixture();
+    const contacted = updatePlayerExploration({
+      ...initial,
+      units: initial.units.map(unit => ({ ...unit, x: unit.ownerId === "p1" ? 4 : 5 })),
+      cities: [{ id: "p2-city", ownerId: "p2", x: 4, y: 1, townHallLevel: 1 }],
+    });
+    expect(getPlayerView(contacted, "p1").units.map(unit => unit.id)).toEqual(["u1", "u2"]);
+    expect(getPlayerView(contacted, "p2").units.map(unit => unit.id)).toEqual(["u1", "u2"]);
+    const moved = applyAction(contacted, { type: "move", playerId: "p1", unitId: "u1", to: { x: 3, y: 2 } });
+    const handedOff = applyAction(moved, { type: "END_TURN", playerId: "p1" });
+    const restored: GameState = JSON.parse(JSON.stringify(handedOff));
+    for (const state of [moved, handedOff, restored]) {
+      expect(getPlayerView(state, "p1").units.map(unit => unit.id)).toEqual(["u1"]);
+      expect(getPlayerView(state, "p2").units.map(unit => unit.id)).toEqual(["u1", "u2"]);
+      expect(getTileVisibility(state, "p1", "5,2")).toBe(TileVisibility.Explored);
+      expect(getTileVisibility(state, "p2", "3,2")).toBe(TileVisibility.Visible);
+      expect(state.exploration!.p1.exploredTiles).not.toContain("4,0");
+      expect(state.exploration!.p2.exploredTiles).toContain("4,0");
+    }
+  });
+
+  it("remembers a stationary enemy after moving away and forgets it when that enemy moves", () => {
+    const initial = fixture();
+    const contact = updatePlayerExploration({
+      ...initial, activePlayerId: "p2",
+      units: initial.units.map(unit => ({ ...unit, x: unit.ownerId === "p1" ? 4 : 5 })),
+    });
+    const departed = applyAction(contact, { type: "move", playerId: "p2", unitId: "u2", to: { x: 6, y: 2 } });
+    expect(getPlayerView(departed, "p1").units.map(unit => unit.id)).toEqual(["u1"]);
+    expect(getPlayerView(departed, "p1").rememberedUnits).toEqual([]);
+    const observer = getPlayerView(departed, "p2");
+    expect(observer.units.map(unit => unit.id)).toEqual(["u2"]);
+    expect(observer.rememberedUnits).toEqual([expect.objectContaining({ id: "u1", x: 4, y: 2, hp: 10, movement: 0, homeCityId: null })]);
+    expect(isTileVisible(observer, "p2", "4,2")).toBe(false);
+    expect(getAttackTargets(observer, "u2")).toEqual([]);
+    const changed = updatePlayerExploration({ ...departed, units: departed.units.map(unit => unit.id === "u1" ? { ...unit, hp: 4 } : unit) });
+    expect(getPlayerView(changed, "p2").rememberedUnits![0].hp).toBe(10);
+    const handedOff = applyAction(departed, { type: "END_TURN", playerId: "p2" });
+    const restored: GameState = JSON.parse(JSON.stringify(handedOff));
+    expect(getPlayerView(restored, "p2").rememberedUnits).toEqual(observer.rememberedUnits);
+    expect(Object.keys(getPlayerView(restored, "p2").exploration!)).toEqual(["p2"]);
+    const moved = applyAction(restored, { type: "move", playerId: "p1", unitId: "u1", to: { x: 3, y: 2 } });
+    expect(getPlayerView(moved, "p2").rememberedUnits).toEqual([]);
+    expect(isTileExplored(moved, "p2", "4,2")).toBe(true);
+    const returned = updatePlayerExploration({ ...moved, units: moved.units.map(unit => unit.id === "u1" ? { ...unit, x: 5 } : unit) });
+    expect(getPlayerView(returned, "p2").units.map(unit => unit.id)).toEqual(["u1", "u2"]);
+    expect(getPlayerView(returned, "p2").rememberedUnits).toEqual([]);
+  });
+
   it("recalculates city capture and unit death while retaining historical city and terrain snapshots", () => {
     const initial = fixture();
     const discovered = updatePlayerExploration({ ...initial, cities: [{ id: "city", ownerId: "p1", x: 4, y: 2, townHallLevel: 1 }] });

@@ -88,6 +88,7 @@ export type GameState = {
   exploration?: Record<string, PlayerExploration>;
   perspectiveId?: string;
   rememberedTerritory?: TileTerritory[];
+  rememberedUnits?: Unit[];
   seed: string;
   width: number;
   height: number;

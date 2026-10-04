@@ -420,6 +420,40 @@ describe("lobby WebSocket server", () => {
     expect(state).toEqual(applyAction(saved, { type: "END_TURN", playerId: saved.activePlayerId }));
   });
 
+  it("sends independent remembered sightings and restores them on reconnect", async () => {
+    const { clients, state: initial, code } = await match();
+    let state = initial;
+    for (const action of [
+      { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } },
+      { type: "END_TURN" },
+      { type: "move", unitId: "warrior-2", to: { x: 7, y: 4 } },
+      { type: "END_TURN" },
+      { type: "move", unitId: "warrior-1", to: { x: 6, y: 5 } },
+      { type: "END_TURN" },
+      { type: "move", unitId: "warrior-2", to: { x: 7, y: 5 } },
+      { type: "END_TURN" },
+      { type: "END_TURN" },
+      { type: "move", unitId: "warrior-2", to: { x: 7, y: 6 } },
+    ]) state = await act(clients, state, action);
+    const first = getPlayerView(state, state.players[0].id);
+    const second = getPlayerView(state, state.players[1].id);
+    expect(first.units.map(unit => unit.id)).toEqual(["warrior-1"]);
+    expect(first.rememberedUnits).toEqual([]);
+    expect(second.units.map(unit => unit.id)).toEqual(["warrior-2"]);
+    expect(second.rememberedUnits).toEqual([expect.objectContaining({ id: "warrior-1", x: 6, y: 5 })]);
+    const session = clients[1].session();
+    await clients[1].close();
+    const resumed = await connect();
+    resumed.send({ type: "RESUME_MATCH", code, token: session.token });
+    expect((await clients[0].next()).type).toBe("LOBBY_UPDATE");
+    expect((await resumed.next()).type).toBe("LOBBY_UPDATE");
+    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state: second, action: null });
+    clients[1] = resumed;
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
+    expect(getPlayerView(state, state.players[1].id).rememberedUnits).toEqual([]);
+  });
+
   it("authoritatively builds Ports and carries units through the same synchronized action boundary", async () => {
     const { clients, state: matchState, code } = await match();
     let state = matchState;

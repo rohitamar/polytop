@@ -150,13 +150,14 @@ export function createWorld(
     if (!result) {
       result = mat.clone(`${mat.name} remembered`);
       const gray = (mat.diffuseColor.r + mat.diffuseColor.g + mat.diffuseColor.b) / 3;
-      result.diffuseColor = mat.diffuseColor.scale(0.2).add(new Color3(gray, gray, gray).scale(0.22));
-      result.emissiveColor = mat.emissiveColor.scale(0.3);
+      result.diffuseColor = mat.diffuseColor.scale(0.58).add(new Color3(gray, gray, gray).scale(0.12));
+      result.emissiveColor = mat.emissiveColor.scale(0.7);
       shadedMaterials.set(mat, result);
     }
     return result;
   };
   let rememberedModel = false;
+  const unitMaterials = new WeakMap<AbstractMesh, StandardMaterial>();
   const fogMaterial = (mat: StandardMaterial, state: GameState, tile: Position) =>
     getTileVisibility(state, state.perspectiveId!, tile) === TileVisibility.Explored ? shaded(mat) : mat;
   const grass = [
@@ -803,11 +804,13 @@ export function createWorld(
     fogMeshes.push(surface);
   };
   const update = (state: GameState, selectedUnitId: string | null) => {
+    const renderedUnits = [...state.units, ...(state.rememberedUnits ?? [])];
+    const rememberedUnitIds = new Set(state.rememberedUnits?.map(unit => unit.id));
     const signature = JSON.stringify([state.width, state.height, state.perspectiveId, state.tiles.map(tile => [tile.x, tile.y, tile.terrain, getTileVisibility(state, state.perspectiveId!, tile)])]);
     if (signature !== terrainSignature) rebuild(state, true);
     updateFog(state);
     for (const [id, model] of cityModels) if (!state.cities.some(city => city.id === id)) { model.node.dispose(); cityModels.delete(id); }
-    for (const [id, model] of warriors) if (!state.units.some(unit => unit.id === id)) {
+    for (const [id, model] of warriors) if (!renderedUnits.some(unit => unit.id === id)) {
       model.dispose(); warriors.delete(id); ownerRings.delete(id);
       healthLabels.get(id)?.dispose(); healthLabels.delete(id); healthValues.delete(id);
     }
@@ -889,8 +892,18 @@ export function createWorld(
       cityModels.set(city.id, { node, signature });
       rememberedModel = false;
     }
-    for (const unit of state.units) {
+    for (const unit of renderedUnits) {
       if (!warriors.has(unit.id)) createWarrior(unit, state.players.findIndex(player => player.id === unit.ownerId));
+      const remembered = rememberedUnitIds.has(unit.id);
+      for (const mesh of warriors.get(unit.id)!.getChildMeshes()) {
+        if (mesh.name === `health-${unit.id}`) { mesh.setEnabled(!remembered); continue; }
+        if (mesh.material instanceof StandardMaterial) {
+          if (!unitMaterials.has(mesh)) unitMaterials.set(mesh, mesh.material);
+          const original = unitMaterials.get(mesh)!;
+          mesh.material = remembered ? shaded(original) : original;
+        }
+        mesh.isPickable = !remembered && !!mesh.metadata?.unitId;
+      }
       warriors.get(unit.id)!.position.copyFrom(tilePoint(unit, true));
       scene.getMeshByName(`raft-${unit.id}`)?.setEnabled(!!unit.embarked);
       const texture = healthLabels.get(unit.id);

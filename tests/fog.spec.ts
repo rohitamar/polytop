@@ -3,13 +3,16 @@ import "../apps/web/src/debug";
 
 const snapshot = (page: Page) => page.evaluate(() => window.__GAME_DEBUG__!.getState());
 
-async function move(page: Page, x: number, y: number) {
-  const unit = await page.evaluate(() => window.__GAME_DEBUG__!.getUnitScreenPosition("warrior-1"));
+async function move(page: Page, x: number, y: number, unitId = "warrior-1") {
+  const unit = await page.evaluate(id => window.__GAME_DEBUG__!.getUnitScreenPosition(id), unitId);
   await page.mouse.click(unit.x, unit.y);
-  await expect.poll(() => page.evaluate(() => window.__GAME_DEBUG__!.getSelectedUnitId())).toBe("warrior-1");
+  await expect.poll(() => page.evaluate(() => window.__GAME_DEBUG__!.getSelectedUnitId())).toBe(unitId);
   const tile = await page.evaluate(position => window.__GAME_DEBUG__!.getTileScreenPosition(position.x, position.y), { x, y });
   await page.mouse.click(tile.x, tile.y);
-  await expect.poll(async () => (await snapshot(page)).units.find(unit => unit.id === "warrior-1")?.x).toBe(x);
+  await expect.poll(async () => {
+    const unit = (await snapshot(page)).units.find(unit => unit.id === unitId);
+    return unit && { x: unit.x, y: unit.y };
+  }).toEqual({ x, y });
   await expect.poll(() => page.evaluate(() => window.__GAME_DEBUG__!.isAnimating())).toBe(false);
 }
 
@@ -43,4 +46,42 @@ test("local fog obscures hidden metadata, changes perspective and preserves expl
   expect(explored.tiles.some(tile => tile.x === 2 && tile.y === 8)).toBe(true);
   expect(errors).toEqual([]);
   await page.screenshot({ path: "test-results/fog-local.png" });
+});
+
+test("retains the stationary enemy's sighting until that enemy moves, independently for each player", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/");
+  await page.waitForFunction(() => !!window.__GAME_DEBUG__);
+  const endTurn = () => page.getByRole("button", { name: "End Turn", exact: true }).click();
+  await move(page, 5, 5);
+  await endTurn();
+  await move(page, 7, 4, "warrior-2");
+  await endTurn();
+  await move(page, 6, 5);
+  await endTurn();
+  await move(page, 7, 5, "warrior-2");
+  expect((await snapshot(page)).units.map(unit => unit.id)).toEqual(["warrior-1", "warrior-2"]);
+  await endTurn();
+  expect((await snapshot(page)).units.map(unit => unit.id)).toEqual(["warrior-1", "warrior-2"]);
+  await endTurn();
+  await move(page, 7, 6, "warrior-2");
+  const second = await snapshot(page);
+  expect(second.units.map(unit => unit.id)).toEqual(["warrior-2"]);
+  expect(second.rememberedUnits).toEqual([expect.objectContaining({ id: "warrior-1", x: 6, y: 5 })]);
+  const rememberedTile = await page.evaluate(() => window.__GAME_DEBUG__!.getTileScreenPosition(6, 5));
+  await page.keyboard.press("Escape");
+  await page.mouse.click(rememberedTile.x, rememberedTile.y);
+  await expect(page.getByRole("status")).toContainText("Previously explored");
+  expect(await page.evaluate(() => window.__GAME_DEBUG__!.getSelectedUnitId())).toBeNull();
+  await expect(page.getByRole("button", { name: "Attack", exact: true })).toHaveCount(0);
+  await page.screenshot({ path: "test-results/fog-remembered-enemy.png" });
+  await endTurn();
+  const first = await snapshot(page);
+  expect(first.units.map(unit => unit.id)).toEqual(["warrior-1"]);
+  expect(first.rememberedUnits).toEqual([]);
+  await move(page, 5, 5);
+  await endTurn();
+  expect((await snapshot(page)).rememberedUnits).toEqual([]);
+  expect(errors).toEqual([]);
 });
