@@ -321,7 +321,7 @@ describe("lobby WebSocket server", () => {
     for (let i = 0; i < 4; i++) state = await act(clients, state, { type: "END_TURN" });
     const before = structuredClone(state);
     const action = { type: "RECRUIT_UNIT", cityId: "city-1", unitType: "warrior" } as const;
-    for (const [client, invalid] of [[clients[1], action], [clients[0], { ...action, unitType: "archer" }], [clients[0], { ...action, unitType: "swordsman" }], [clients[0], { ...action, unitType: "dragon" }], [clients[0], { ...action, cityId: "city-2" }], [clients[0], { ...action, playerId: state.players[1].id }]] as const) {
+    for (const [client, invalid] of [[clients[1], action], [clients[0], { ...action, unitType: "archer" }], [clients[0], { ...action, unitType: "swordsman" }], [clients[0], { ...action, unitType: "defender" }], [clients[0], { ...action, unitType: "catapult" }], [clients[0], { ...action, unitType: "rider" }], [clients[0], { ...action, unitType: "giant" }], [clients[0], { ...action, unitType: "dragon" }], [clients[0], { ...action, cityId: "city-2" }], [clients[0], { ...action, playerId: state.players[1].id }]] as const) {
       client.send({ type: "GAME_ACTION", requestId: "invalid-recruit", expectedRevision: state.revision, action: invalid });
       expect(["ACTION_REJECTED", "LOBBY_ERROR"]).toContain((await client.next()).type);
     }
@@ -345,6 +345,51 @@ describe("lobby WebSocket server", () => {
     const unchanged = structuredClone(state);
     state = await act(clients, state, { type: "END_TURN" });
     expect(state).toEqual(applyAction(unchanged, { type: "END_TURN", playerId: unchanged.activePlayerId }));
+  });
+
+  it("synchronizes Rider recruitment, combat and one Escape move", async () => {
+    const { clients, state: initial } = await match();
+    let state = await act(clients, initial, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
+    for (let i = 0; i < 6; i++) state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "riding" });
+    state = await act(clients, state, { type: "RECRUIT_UNIT", cityId: "city-1", unitType: "rider" });
+    const id = state.units.at(-1)!.id;
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 5, y: 4 } });
+    state = await act(clients, state, { type: "move", unitId: id, to: { x: 6, y: 5 } });
+    expect(state.units.find(unit => unit.id === id)!.movement).toBe(0);
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "move", unitId: "warrior-2", to: { x: 7, y: 4 } });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "move", unitId: id, to: { x: 6, y: 4 } });
+    state = await act(clients, state, { type: "ATTACK_UNIT", unitId: id, targetId: "warrior-2" });
+    expect(state.units.find(unit => unit.id === id)).toMatchObject({ actionPhase: "escape", movement: 2, hasAttacked: true });
+    clients[0].send({ type: "GAME_ACTION", requestId: "second-attack", expectedRevision: state.revision, action: { type: "ATTACK_UNIT", unitId: id, targetId: "warrior-2" } });
+    expect((await clients[0].next()).type).toBe("ACTION_REJECTED");
+    state = await act(clients, state, { type: "move", unitId: id, to: { x: 6, y: 5 } });
+    expect(state.units.find(unit => unit.id === id)).toMatchObject({ actionPhase: "complete", movement: 0 });
+    clients[0].send({ type: "GAME_ACTION", requestId: "second-escape", expectedRevision: state.revision, action: { type: "move", unitId: id, to: { x: 7, y: 5 } } });
+    expect((await clients[0].next()).type).toBe("ACTION_REJECTED");
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    expect(state.units.find(unit => unit.id === id)).toMatchObject({ actionPhase: "ready", movement: 2, hasAttacked: false });
+  });
+
+  it("synchronizes the one-time city Giant reward and rejects direct recruitment", async () => {
+    const { clients, state: initial } = await match();
+    let state = await act(clients, initial, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
+    for (let i = 0; i < 12; i++) state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "UPGRADE_TOWN_HALL", cityId: "city-1" });
+    state = await act(clients, state, { type: "UPGRADE_TOWN_HALL", cityId: "city-1" });
+    const gold = state.players[0].resources.gold;
+    state = await act(clients, state, { type: "CLAIM_GIANT", cityId: "city-1" });
+    expect(state.units.at(-1)).toMatchObject({ unitType: "giant", hp: 40 });
+    expect(state.players[0].resources.gold).toBe(gold);
+    for (const action of [{ type: "CLAIM_GIANT", cityId: "city-1" }, { type: "RECRUIT_UNIT", cityId: "city-1", unitType: "giant" }]) {
+      clients[0].send({ type: "GAME_ACTION", requestId: "invalid-giant", expectedRevision: state.revision, action });
+      expect((await clients[0].next()).type).toBe("ACTION_REJECTED");
+    }
   });
 
   it("rejects late joining and malformed JSON without replacing match state", async () => {

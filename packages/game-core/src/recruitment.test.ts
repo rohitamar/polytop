@@ -8,7 +8,7 @@ function fixture() {
   state.units[0].x = 3;
   getTile(state, 4, 4)!.terrain = "water";
   state.players[0].resources.gold = 10;
-  state.players[0].technologies = ["archery", "smithery", "riding", "sailing"];
+  state.players[0].technologies = ["archery", "smithery", "riding", "sailing", "strategy", "mathematics"];
   return state;
 }
 function freeze<T>(value: T): T {
@@ -20,12 +20,12 @@ function freeze<T>(value: T): T {
 }
 
 describe("recruitment", () => {
-  it.each(unitDefinitions.filter(definition => definition.domain === "land"))("recruits $name atomically from centralized definitions", definition => {
+  it.each(unitDefinitions.filter(definition => definition.domain === "land" && definition.recruitable))("recruits $name atomically from centralized definitions", definition => {
     const state = freeze(fixture());
     const before = structuredClone(state);
     const next = applyAction(state, { ...recruit, unitType: definition.id });
     expect(next.revision).toBe(state.revision + 1);
-    expect(next.players[0].resources.gold).toBe(10 - definition.goldCost);
+    expect(next.players[0].resources.gold).toBe(10 - definition.goldCost!);
     expect(next.units.at(-1)).toMatchObject({ unitType: definition.id, x: 4, y: 5, homeCityId: "city-1", ownerId: "player-1", populationCost: definition.populationCost, hp: definition.maxHp, maxMovement: definition.maxMovement, attack: definition.attack, defense: definition.defense, range: definition.range, movement: 0, hasAttacked: true });
     expect(getPlayerPopulation(next, "player-1")).toMatchObject({ used: 1 + definition.populationCost, capacity: 3, available: 2 - definition.populationCost });
     expect(state).toEqual(before);

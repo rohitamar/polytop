@@ -365,6 +365,35 @@ export function createWorld(
       mast.position.set(0, 0.68, 0.27);
       const sail = box("sailor sail", 0.50, 0.52, 0.025, cloak, warrior);
       sail.position.set(0.20, 0.96, 0.27);
+    } else if (unit.unitType === "defender") {
+      shield.scaling.set(1.8, 1.8, 1.8);
+      blade.setEnabled(false);
+      guard.setEnabled(false);
+    } else if (unit.unitType === "catapult") {
+      for (const mesh of warrior.getChildMeshes()) mesh.setEnabled(false);
+      const chassis = box("catapult chassis", 0.65, 0.22, 0.7, bark, warrior);
+      chassis.position.y = 0.25;
+      const arm = box("catapult arm", 0.1, 0.85, 0.1, bark, warrior);
+      arm.position.set(0, 0.65, 0);
+      arm.rotation.x = -0.5;
+      const cup = box("catapult cup", 0.3, 0.15, 0.3, dark, warrior);
+      cup.position.set(0, 1, -0.2);
+      for (const x of [-0.35, 0.35]) {
+        const wheel = cone("catapult wheel", 0.12, 0.4, dark, warrior, 0.4);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(x, 0.2, 0);
+      }
+    } else if (unit.unitType === "giant") {
+      for (const mesh of warrior.getChildMeshes()) {
+        mesh.scaling.scaleInPlace(1.45);
+        mesh.position.scaleInPlace(1.45);
+      }
+      plume.setEnabled(false);
+      helmet.setEnabled(false);
+      blade.setEnabled(false);
+      guard.setEnabled(false);
+      shield.setEnabled(false);
+      emblem.setEnabled(false);
     } else if (unit.unitType === "swordsman") {
       blade.scaling.set(1.7, 1.3, 1.7);
       shield.scaling.set(1.2, 1.2, 1.2);

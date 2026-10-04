@@ -101,7 +101,7 @@ test("recruitment costs and restrictions fit a narrow viewport", async ({ page }
   await unit(page, "warrior-1");
   await page.getByRole("button", { name: "Recruit units", exact: true }).click();
   const panel = page.getByRole("region", { name: "Selected city", exact: true });
-  for (const name of ["Warrior", "Archer", "Rider", "Swordsman"]) {
+  for (const name of ["Warrior", "Archer", "Rider", "Swordsman", "Defender", "Catapult"]) {
     const option = page.getByRole("article", { name, exact: true });
     await option.scrollIntoViewIfNeeded();
     await expect(option).toBeVisible();

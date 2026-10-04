@@ -1,9 +1,9 @@
 import { generateWorld, placeResources, resourceRules, type WorldConfig } from "./world";
 import { getTechnology, getTechnologyCost, getTechnologyUnlockReason, hasTechnology, type TechnologyId } from "./technologies";
-import { getUnitDefinition, getUnitStats, type UnitType } from "./units";
+import { getUnitDefinition, getUnitStats, hasUnitAbility, isUnitEnabled, fullRuleset, type GameRules, type UnitType } from "./units";
 import { computeVisibleTiles, isTileVisible, updatePlayerExploration, type PlayerExploration } from "./fog";
 export { TileVisibility, visionRules, tilesInRange, computeVisibleTiles, updatePlayerExploration, getTileVisibility, isTileVisible, isTileExplored, getPlayerView, getPlayerAction, type PlayerView, type PlayerExploration } from "./fog";
-export { unitDefinitions, getUnitDefinition, type UnitType, type UnitDefinition } from "./units";
+export { fullRuleset, hasUnitAbility, isUnitEnabled, type GameRules, type UnitAbility, unitDefinitions, getUnitDefinition, type UnitType, type UnitDefinition } from "./units";
 export { technologies, getTechnology, getTechnologyCost, hasTechnology, canUnlockTechnology, getTechnologyUnlockReason, type TechnologyId, type TechnologyDefinition, type TechEffect } from "./technologies";
 export { getMapSize, mapSizes, terrainRules, resourceRules, type WorldConfig } from "./world";
 export type Terrain = "grass" | "forest" | "mountain" | "water";
@@ -17,6 +17,7 @@ export type City = Position & {
   id: string;
   ownerId: string | null;
   townHallLevel: number;
+  giantReward?: "available" | "claimed";
 };
 export const resourceDefinitions: Record<Opportunity, { goldReward: number; requiredTechnology: TechnologyId | null }> = {
   orchard: { goldReward: 2, requiredTechnology: null },
@@ -83,8 +84,10 @@ export type Unit = Position & {
   defense: number;
   range: number;
   hasAttacked: boolean;
+  actionPhase?: "ready" | "moved" | "escape" | "complete";
 };
 export type GameState = {
+  rules?: GameRules;
   exploration?: Record<string, PlayerExploration>;
   perspectiveId?: string;
   rememberedTerritory?: TileTerritory[];
@@ -131,6 +134,7 @@ export type GameAction =
       to: Position;
     }
   | { type: "ATTACK_UNIT"; playerId: string; unitId: string; targetId: string }
+  | { type: "CLAIM_GIANT"; playerId: string; cityId: string }
   | { type: "UPGRADE_TOWN_HALL"; playerId: string; cityId: string }
   | { type: "UNLOCK_TECHNOLOGY"; playerId: string; technologyId: TechnologyId }
   | { type: "RECRUIT_UNIT"; playerId: string; cityId: string; unitType: UnitType }
@@ -229,7 +233,7 @@ export const getTile = (state: GameState, x: number, y: number) => {
   return indexed?.x === x && indexed.y === y ? indexed : state.tiles.find(tile => tile.x === x && tile.y === y);
 };
 
-export function createGame(seed = "fern-104", playerCount = 2, config: WorldConfig = {}): GameState {
+export function createGame(seed = "fern-104", playerCount = 2, config: WorldConfig & { rules?: GameRules } = {}): GameState {
   const world = generateWorld(seed, playerCount, config);
   const { starts, villages, tiles } = world;
   const cities: City[] = [
@@ -249,6 +253,7 @@ export function createGame(seed = "fern-104", playerCount = 2, config: WorldConf
   placeResources(seed, tiles, world.width, world.height);
   for (const tile of tiles) if (cities.some(city => city.x === tile.x && city.y === tile.y)) delete tile.resource;
   const state: GameState = {
+    rules: { enabledUnitTypes: [...(config.rules ?? fullRuleset).enabledUnitTypes], enabledUnitAbilities: [...(config.rules ?? fullRuleset).enabledUnitAbilities] },
     seed,
     width: world.width,
     height: world.height,
@@ -281,6 +286,7 @@ export function createGame(seed = "fern-104", playerCount = 2, config: WorldConf
       homeCityId: `city-${i + 1}`,
       hp: warriorStats.maxHp,
       hasAttacked: false,
+      actionPhase: "ready",
     })),
   };
   const claims = new Map(getTerritory(state).map(tile => [positionKey(tile), tile.cityId]));
@@ -307,7 +313,7 @@ export function getReachableTiles(
   unitId: string,
 ): ReachableTile[] {
   const unit = state.units.find((candidate) => candidate.id === unitId);
-  if (!unit || unit.hasAttacked || unit.ownerId !== state.activePlayerId)
+  if (!unit || !isUnitEnabled(state.rules, unit.unitType) || unit.actionPhase === "complete" || (unit.hasAttacked && (unit.actionPhase !== "escape" || !hasUnitAbility(state.rules, unit.unitType, "ESCAPE"))) || unit.ownerId !== state.activePlayerId)
     return [];
   const start: ReachableTile = { x: unit.x, y: unit.y, cost: 0, path: [] };
   const visited = new Map<string, ReachableTile>([[positionKey(start), start]]);
@@ -363,6 +369,8 @@ function arriveUnit(state: GameState, unit: Unit, destination: Position, cost: n
     ...(transforms ? water ? { embarked: true, maxMovement: portRules.maxMovement, attack: 0, defense: 1, range: 0 } : { ...getUnitStats(unit.unitType), embarked: false, maxHp: unit.maxHp } : {}),
     movement: transforms || unit.embarked ? 0 : unit.movement - cost,
     hasAttacked: transforms || unit.hasAttacked,
+    actionPhase: transforms || unit.hasAttacked ? "complete" : "moved",
+    ...(unit.hasAttacked ? { movement: 0 } : {}),
   };
 }
 
@@ -382,7 +390,7 @@ const distance = gridDistance;
 
 export function getAttackTargets(state: GameState, unitId: string): Unit[] {
   const unit = state.units.find((candidate) => candidate.id === unitId);
-  if (!unit || unit.ownerId !== state.activePlayerId || unit.hasAttacked || unit.embarked)
+  if (!unit || unit.ownerId !== state.activePlayerId || unit.hasAttacked || unit.embarked || !isUnitEnabled(state.rules, unit.unitType) || unit.actionPhase === "complete" || (unit.actionPhase === "moved" && !hasUnitAbility(state.rules, unit.unitType, "DASH")))
     return [];
   const visible = computeVisibleTiles(state, unit.ownerId);
   return state.units.filter(
@@ -405,7 +413,7 @@ export function previewCombat(
     Math.max(
       1,
       Math.round(
-        (5 * source.attack * (hp / source.maxHp)) / Math.max(1, target.defense),
+        (5 * source.attack * (hp / source.maxHp)) / Math.max(1, target.defense * getDefenseBonus(state, target)),
       ),
     );
   const damage = Math.min(
@@ -414,7 +422,7 @@ export function previewCombat(
   );
   const defenderHp = defender.hp - damage;
   const retaliation =
-    defenderHp > 0 && !defender.embarked && distance(attacker, defender) <= defender.range
+    defenderHp > 0 && !defender.embarked && !hasUnitAbility(state.rules, defender.unitType, "STIFF") && distance(attacker, defender) <= defender.range
       ? Math.min(attacker.hp, damageFor(defender, attacker, defenderHp))
       : 0;
   const tile = getTile(state, defender.x, defender.y);
@@ -433,6 +441,25 @@ export function previewCombat(
         ? { x: defender.x, y: defender.y }
         : null,
   };
+}
+
+export function getDefenseBonus(state: GameState, unit: Unit): number {
+  return hasUnitAbility(state.rules, unit.unitType, "FORTIFY") && !unit.embarked && state.cities.some(city => city.ownerId === unit.ownerId && positionKey(city) === positionKey(unit)) ? 1.5 : 1;
+}
+
+function spawnUnit(state: GameState, unitType: UnitType, position: Position & { id: string }, ownerId: string): Unit {
+  const definition = getUnitDefinition(unitType)!;
+  return { x: position.x, y: position.y, ...getUnitStats(unitType), id: `recruit-${state.revision + 1}`, ownerId, homeCityId: position.id, movement: 0, hp: definition.maxHp, hasAttacked: true, actionPhase: "complete" };
+}
+
+export function getGiantRewardReason(state: GameState, playerId: string, cityId: string): string | null {
+  if (state.activePlayerId !== playerId) return "Not your turn";
+  const city = state.cities.find(candidate => candidate.id === cityId);
+  if (!city || city.ownerId !== playerId) return "Not your city";
+  if (city.giantReward !== "available") return "No super-unit reward available";
+  if (!isUnitEnabled(state.rules, "giant")) return "Unit disabled by current ruleset";
+  if (!getRecruitSpawn(state, cityId, "giant")) return "City spawn tile must be empty and passable";
+  return null;
 }
 
 export function getRecruitSpawn(state: GameState, cityId: string, unitType: UnitType = "warrior"): Position | null {
@@ -459,6 +486,8 @@ export function getRecruitmentReason(state: GameState, playerId: string, cityId:
   if (!city || city.ownerId !== playerId) return "Not your city";
   const definition = getUnitDefinition(unitType);
   if (!definition) return "Unknown unit type";
+  if (!isUnitEnabled(state.rules, definition.id as UnitType)) return "Unit disabled by current ruleset";
+  if (!definition.recruitable || definition.goldCost === null) return "Requires city super-unit reward";
   if (definition.domain === "naval") return "Build a Port and move a land unit onto it";
   if (definition.requiredTechnology && !hasTechnology(state, playerId, definition.requiredTechnology)) return `Requires ${getTechnology(definition.requiredTechnology)!.name}`;
   if (player.resources.gold < definition.goldCost) return "Not enough Gold";
@@ -488,6 +517,7 @@ function transition(state: GameState, action: GameAction): GameState {
     action.type !== "ATTACK_UNIT" &&
     action.type !== "END_TURN" &&
     action.type !== "UPGRADE_TOWN_HALL" &&
+    action.type !== "CLAIM_GIANT" &&
     action.type !== "UNLOCK_TECHNOLOGY" &&
     action.type !== "RECRUIT_UNIT" &&
     action.type !== "BUILD_ROAD" &&
@@ -526,8 +556,8 @@ function transition(state: GameState, action: GameAction): GameState {
     return {
       ...state,
       revision: state.revision + 1,
-      players: state.players.map(player => player.id === action.playerId ? { ...player, resources: { gold: player.resources.gold - definition.goldCost } } : player),
-      units: [...state.units, { ...spawn, ...getUnitStats(action.unitType), id: `recruit-${state.revision + 1}`, ownerId: action.playerId, homeCityId: action.cityId, movement: 0, hp: definition.maxHp, hasAttacked: true }],
+      players: state.players.map(player => player.id === action.playerId ? { ...player, resources: { gold: player.resources.gold - definition.goldCost! } } : player),
+      units: [...state.units, spawnUnit(state, action.unitType, { ...spawn, id: action.cityId }, action.playerId)],
     };
   }
   if (action.type === "UNLOCK_TECHNOLOGY") {
@@ -566,7 +596,7 @@ function transition(state: GameState, action: GameAction): GameState {
       ),
       units: state.units.map((unit) =>
         unit.ownerId === nextPlayer.id
-          ? { ...unit, movement: unit.maxMovement, hasAttacked: false }
+          ? { ...unit, movement: unit.maxMovement, hasAttacked: false, actionPhase: "ready" }
           : unit,
       ),
     };
@@ -576,12 +606,20 @@ function transition(state: GameState, action: GameAction): GameState {
     if (!city || city.ownerId !== action.playerId) throw new Error("Not your city");
     const updated = { ...city };
     const resources = { ...state.players[playerIndex].resources };
+    if (action.type === "CLAIM_GIANT") {
+      const reason = getGiantRewardReason(state, action.playerId, city.id);
+      if (reason) throw new Error(reason);
+      return { ...state, revision: state.revision + 1,
+        cities: state.cities.map(candidate => candidate.id === city.id ? { ...candidate, giantReward: "claimed" } : candidate),
+        units: [...state.units, spawnUnit(state, "giant", city, action.playerId)] };
+    }
     if (action.type === "UPGRADE_TOWN_HALL") {
       const cost = getUpgradeCost(city);
       if (cost === null) throw new Error("Town Hall is at maximum level");
       if (resources.gold < cost) throw new Error("Not enough Gold");
       resources.gold -= cost;
       updated.townHallLevel++;
+      if (updated.townHallLevel === economy.maxLevel) updated.giantReward = "available";
     }
     return { ...state, revision: state.revision + 1,
       players: state.players.map(player => player.id === action.playerId ? { ...player, resources } : player),
@@ -600,23 +638,24 @@ function transition(state: GameState, action: GameAction): GameState {
     unit.ownerId !== action.playerId
   )
     throw new Error("Not your unit or turn");
-  if (unit.hasAttacked) throw new Error("Unit has finished acting");
+  if (!isUnitEnabled(state.rules, unit.unitType)) throw new Error("Unit disabled by current ruleset");
+  if (unit.actionPhase === "complete" || (unit.hasAttacked && (action.type !== "move" || unit.actionPhase !== "escape" || !hasUnitAbility(state.rules, unit.unitType, "ESCAPE")))) throw new Error("Unit has finished acting");
   if (action.type === "ATTACK_UNIT") {
     const result = previewCombat(state, unit.id, action.targetId);
+    const finishAttack = (candidate: Unit): Unit => {
+      const attacked = { ...candidate, hp: result.attackerHp, movement: 0, hasAttacked: true };
+      const advanced = result.advance ? arriveUnit(state, attacked, result.advance, 0) : attacked;
+      const escape = !advanced.embarked && hasUnitAbility(state.rules, advanced.unitType, "ESCAPE");
+      return { ...advanced, movement: escape ? advanced.maxMovement : 0, actionPhase: escape ? "escape" : "complete" };
+    };
     const next: GameState = {
       ...state,
       revision: state.revision + 1,
       cities: capture(result.advance ? [result.advance] : []),
       units: state.units
-        .map((candidate) =>
+        .map((candidate): Unit =>
           candidate.id === unit.id
-            ? {
-                ...candidate,
-                hp: result.attackerHp,
-                movement: 0,
-                hasAttacked: true,
-                ...(result.advance ? arriveUnit(state, { ...candidate, hp: result.attackerHp, movement: 0, hasAttacked: true }, result.advance, 0) : {}),
-              }
+            ? finishAttack(candidate)
             : candidate.id === action.targetId
               ? { ...candidate, hp: result.defenderHp }
               : candidate,

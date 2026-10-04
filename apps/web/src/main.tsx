@@ -14,6 +14,8 @@ import {
   portRules,
   getPortBuildingReason,
   unitDefinitions,
+  getGiantRewardReason,
+  hasUnitAbility,
   getUnitDefinition,
   getRecruitmentReason,
   getTechnology,
@@ -146,11 +148,14 @@ function App() {
       world.current?.update(next, selection.current);
       busy.current = false;
       setMoving(false);
+      const actedUnitId = message.action && "unitId" in message.action ? message.action.unitId : null;
       const collected = message.action?.playerId === next.perspectiveId ? collectionNotice(previous, next) : "";
       setNotice(collected || (message.action?.type === "UNLOCK_TECHNOLOGY"
         ? `${next.players.find(player => player.id === message.action!.playerId)!.name} unlocked ${getTechnology(message.action.technologyId)!.name}.`
         : message.action?.type === "BUILD_PORT" ? `Port built for ${portRules.goldCost} Gold.` : message.action?.type === "BUILD_ROAD" ? `Road built for ${roadRules.goldCost} Gold.`
         : message.action?.type === "RECRUIT_UNIT" ? `${getUnitDefinition(message.action.unitType)!.name} recruited. Ready on your next turn.`
+        : message.action?.type === "CLAIM_GIANT" ? "Giant reward claimed. Ready on your next turn."
+        : message.action?.type === "ATTACK_UNIT" && next.units.find(unit => unit.id === actedUnitId)?.actionPhase === "escape" ? "Attack complete. Escape movement available."
         : ""));
     }).catch(error => {
       busy.current = false;
@@ -255,7 +260,7 @@ function App() {
       stateRef.current = next;
       setState(next);
       world.current?.update(next, selection.current);
-      setNotice(action.type === "BUILD_PORT" ? `Port built for ${portRules.goldCost} Gold. Move a land unit onto it to embark.` : action.type === "BUILD_ROAD" ? `Road built for ${roadRules.goldCost} Gold.` : action.type === "RECRUIT_UNIT" ? `${getUnitDefinition(action.unitType)!.name} recruited. Ready on your next turn.` : "City economy updated. Production arrives at the start of your next turn.");
+      setNotice(action.type === "BUILD_PORT" ? `Port built for ${portRules.goldCost} Gold. Move a land unit onto it to embark.` : action.type === "BUILD_ROAD" ? `Road built for ${roadRules.goldCost} Gold.` : action.type === "RECRUIT_UNIT" ? `${getUnitDefinition(action.unitType)!.name} recruited. Ready on your next turn.` : action.type === "CLAIM_GIANT" ? "Giant reward claimed. Ready on your next turn." : "City economy updated. Production arrives at the start of your next turn.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Action rejected");
     }
@@ -306,7 +311,7 @@ function App() {
     );
 
     setNotice(
-      collectionNotice(current, next) || "Attack complete. This unit is done for the turn.",
+      collectionNotice(current, next) || (next.units.find(unit => unit.id === result.attackerId)?.actionPhase === "escape" ? "Attack complete. Escape movement available." : "Attack complete. This unit is done for the turn."),
     );
   };
 
@@ -614,14 +619,17 @@ function App() {
           {city.ownerId === treasuryPlayer.id && <div className="city-actions">
             {getUpgradeCost(city) !== null ? <button disabled={moving || waiting || !canAct || activePlayer.resources.gold < getUpgradeCost(city)!}
               onClick={() => cityAction({ type: "UPGRADE_TOWN_HALL", playerId: activePlayer.id, cityId: city.id })}>Upgrade Town Center · {getUpgradeCost(city)} Gold</button> : <p>Maximum Town Center level</p>}
+            {city.giantReward === "available" && <><button disabled={moving || waiting || !canAct || getGiantRewardReason(state, treasuryPlayer.id, city.id) !== null} onClick={() => cityAction({ type: "CLAIM_GIANT", playerId: treasuryPlayer.id, cityId: city.id })}>Claim Giant reward</button><small>{getGiantRewardReason(state, treasuryPlayer.id, city.id) ?? "Free super-unit · Ready next turn"}</small></>}
+            {city.townHallLevel < economy.maxLevel && <small>Maximum level grants one Giant reward. Clear the city tile to claim it.</small>}
           </div>}
           {showRecruitment && city.ownerId === treasuryPlayer.id && <section className="recruitment-panel" aria-label="Recruit units">
             <h3>Recruit</h3>
             <p>Recruits wait until your next turn. Land units need an empty city tile. Move them onto a Port to embark as Rafts.</p>
-            {unitDefinitions.filter(definition => definition.domain === "land").map(definition => {
+            {unitDefinitions.filter(definition => definition.domain === "land" && definition.recruitable).map(definition => {
               const reason = !connected ? "Match disconnected" : waiting ? "Waiting for server" : moving ? "Action in progress" : getRecruitmentReason(state, treasuryPlayer.id, city.id, definition.id);
               return <article key={definition.id} aria-label={definition.name}>
                 <div><strong>{definition.name}</strong><span>{definition.goldCost} Gold · {definition.populationCost} Population</span>
+                  <span>{definition.maxHp} HP · {definition.attack} ATK · {definition.defense} DEF · {definition.maxMovement} Move · Range {definition.range}</span>
                   {definition.requiredTechnology && <span>Requires {getTechnology(definition.requiredTechnology)!.name}</span>}
                   <small>{reason ?? "Available"}</small></div>
                 <button disabled={reason !== null} onClick={() => cityAction({ type: "RECRUIT_UNIT", playerId: treasuryPlayer.id, cityId: city.id, unitType: definition.id })} aria-label={`Recruit ${definition.name}`}>Recruit</button>
@@ -654,6 +662,17 @@ function App() {
           <Icon name="reset" />
         </button>
       </div>
+      {selected && unit && !combat && <section className="unit-info" aria-label="Unit information">
+        <strong>{getUnitDefinition(unit.unitType)!.name}</strong>
+        <p>{unit.hp} / {unit.maxHp} HP · {unit.attack} Attack · {unit.defense} Defense</p>
+        <p>{unit.movement} / {unit.maxMovement} Movement · Range {unit.range}</p>
+        <small>{getUnitDefinition(unit.unitType)!.abilities.filter(ability => hasUnitAbility(state.rules, unit.unitType, ability)).join(" · ")}</small>
+        <p>{unit.actionPhase === "escape" ? "Escape movement available" : unit.hasAttacked ? "Actions complete" : unit.actionPhase === "moved" ? "Moved" : "Ready"}</p>
+        {hasUnitAbility(state.rules, unit.unitType, "ESCAPE") && <small>Escape: one movement action after attacking.</small>}
+        {hasUnitAbility(state.rules, unit.unitType, "STIFF") && <small>Stiff: cannot retaliate.</small>}
+        {!hasUnitAbility(state.rules, unit.unitType, "DASH") && <p>Cannot attack after moving.</p>}
+        {hasUnitAbility(state.rules, unit.unitType, "STATIC") && <small>Static: cannot become a veteran.</small>}
+      </section>}
       {combat && unit && (
         <section className="combat-preview" aria-label="Combat preview">
           <div className="eyebrow">{unit.range > 1 ? "RANGED" : "MELEE"} · COMBAT PREVIEW</div>

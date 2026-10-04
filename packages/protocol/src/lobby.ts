@@ -77,7 +77,7 @@ export function parseLobbyClientMessage(
       (a.type === "BUILD_ROAD" || a.type === "BUILD_PORT") ? exact(a, ["type", "to"]) && position(a.to) :
       a.type === "move" ? exact(a, ["type", "unitId", "to"]) && id(a.unitId) && position(a.to) :
       a.type === "ATTACK_UNIT" ? exact(a, ["type", "unitId", "targetId"]) && id(a.unitId) && id(a.targetId) :
-      a.type === "UPGRADE_TOWN_HALL" ? exact(a, ["type", "cityId"]) && id(a.cityId) :
+      (a.type === "UPGRADE_TOWN_HALL" || a.type === "CLAIM_GIANT") ? exact(a, ["type", "cityId"]) && id(a.cityId) :
       false;
     return valid ? value as LobbyClientMessage : null;
   }

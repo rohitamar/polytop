@@ -50,8 +50,8 @@ describe("warrior combat", () => {
     const preview = previewCombat(state, "warrior-1", "warrior-2");
     expect(preview).toMatchObject({
       damage: 5,
-      retaliation: 3,
-      attackerHp: 7,
+      retaliation: 2,
+      attackerHp: 8,
       defenderHp: 5,
       advance: null,
     });
@@ -149,7 +149,7 @@ describe("warrior combat", () => {
     expect(returned.units[0]).toMatchObject({
       movement: 1,
       hasAttacked: false,
-      hp: 7,
+      hp: 8,
     });
     expect(getAttackTargets(returned, "warrior-1")).toHaveLength(1);
   });

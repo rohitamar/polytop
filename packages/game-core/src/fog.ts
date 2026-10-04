@@ -59,7 +59,7 @@ export function updatePlayerExploration(state: GameState): GameState {
       if (!current || current.ownerId === player.id || positionKey(current) !== positionKey(sighting)) delete units[id];
     }
     for (const unit of state.units) {
-      if (unit.ownerId !== player.id && visible.has(positionKey(unit))) units[unit.id] = { ...unit, homeCityId: null, movement: 0, hasAttacked: false };
+      if (unit.ownerId !== player.id && visible.has(positionKey(unit))) units[unit.id] = { ...unit, homeCityId: null, movement: 0, hasAttacked: false, actionPhase: "ready" };
     }
     for (const key of visible) {
       const tile = tileIndex.get(key);
@@ -99,12 +99,13 @@ export function getPlayerView(state: GameState, playerId: string): PlayerView {
   const memory = refreshed.exploration![playerId];
   const visible = new Set(memory.visibleTiles);
   return {
+    rules: state.rules ? structuredClone(state.rules) : undefined,
     seed: "", width: state.width, height: state.height, revision: state.revision,
     activePlayerId: state.activePlayerId, turnNumber: state.turnNumber, perspectiveId: playerId,
     players: state.players.map(player => player.id === playerId ? { ...player, resources: { ...player.resources }, technologies: [...player.technologies] } : { id: player.id, name: player.name, resources: { gold: 0 }, technologies: [] }),
     tiles: Object.values(memory.tiles).map(tile => ({ ...tile })).sort((a, b) => a.y - b.y || a.x - b.x),
     cities: Object.values(memory.cities).map(city => ({ ...city })),
-    units: state.units.filter(unit => unit.ownerId === playerId || visible.has(positionKey(unit))).map(unit => unit.ownerId === playerId ? { ...unit } : { ...unit, homeCityId: null, movement: 0, hasAttacked: false }),
+    units: state.units.filter(unit => unit.ownerId === playerId || visible.has(positionKey(unit))).map(unit => unit.ownerId === playerId ? { ...unit } : { ...unit, homeCityId: null, movement: 0, hasAttacked: false, actionPhase: "ready" }),
     rememberedUnits: Object.values(memory.units ?? {}).filter(unit => !visible.has(positionKey(unit))).map(unit => ({ ...unit })),
     exploration: { [playerId]: structuredClone(memory) },
     rememberedTerritory: Object.values(memory.territory).map(claim => ({ ...claim })),

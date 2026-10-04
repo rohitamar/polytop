@@ -84,3 +84,16 @@ it("requires a player-specific exploration snapshot in match messages", () => {
   expect(parseLobbyServerMessage(message)).toEqual(message);
   expect(parseLobbyServerMessage({ ...message, state: { ...message.state, exploration: state.exploration } })).toBeNull();
 });
+
+it("accepts city rewards while rejecting forged ability and action state", () => {
+  const envelope = { type: "GAME_ACTION", requestId: "reward", expectedRevision: 0 };
+  const reward = { type: "CLAIM_GIANT", cityId: "city-1" };
+  expect(parseLobbyClientMessage({ ...envelope, action: reward })).not.toBeNull();
+  for (const extra of [{ unitType: "giant" }, { playerId: "player-2" }, { giantReward: "available" }]) {
+    expect(parseLobbyClientMessage({ ...envelope, action: { ...reward, ...extra } })).toBeNull();
+  }
+  const move = { type: "move", unitId: "rider-1", to: { x: 4, y: 5 } };
+  for (const extra of [{ actionPhase: "escape" }, { hasAttacked: false }, { movement: 2 }, { abilities: ["ESCAPE"] }]) {
+    expect(parseLobbyClientMessage({ ...envelope, action: { ...move, ...extra } })).toBeNull();
+  }
+});

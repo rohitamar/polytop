@@ -988,3 +988,20 @@ button:disabled { cursor: default; }
 }
 
 .road-panel { z-index: 4; max-height: calc(100vh - 380px); overflow-y: auto; }
+
+.unit-info {
+  position: absolute;
+  left: 24px;
+  bottom: 110px;
+  max-width: 290px;
+  padding: 16px;
+  background: var(--panel, #fff9eb);
+  border-radius: 14px;
+  box-shadow: 0 4px 20px #0002;
+  pointer-events: auto;
+  font-size: 12px;
+}
+.unit-info p { margin: 6px 0; }
+@media (max-width: 700px) {
+  .unit-info { left: 12px; bottom: 80px; max-width: 220px; padding: 10px; }
+}

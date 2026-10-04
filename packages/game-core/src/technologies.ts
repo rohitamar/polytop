@@ -15,14 +15,14 @@ export type TechnologyDefinition = {
 };
 
 export const technologies = [
-  { id: "organization", name: "Organization", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Future foundation for the Farming and Strategy branches." }], implemented: false },
+  { id: "organization", name: "Organization", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Opens the Farming and Strategy branches." }], implemented: true },
   { id: "farming", name: "Farming", tier: 1, prerequisites: ["organization"], effects: [{ type: "capability", description: "Future farming improvements." }], implemented: false },
   { id: "construction", name: "Construction", tier: 3, prerequisites: ["farming"], effects: [{ type: "capability", description: "Future construction improvements." }], implemented: false },
-  { id: "strategy", name: "Strategy", tier: 2, prerequisites: ["organization"], effects: [{ type: "capability", description: "Future strategic capabilities." }], implemented: false },
+  { id: "strategy", name: "Strategy", tier: 2, prerequisites: ["organization"], effects: [{ type: "capability", description: "Defender recruitment." }], implemented: true },
   { id: "diplomacy", name: "Diplomacy", tier: 3, prerequisites: ["strategy"], effects: [{ type: "capability", description: "Future diplomatic capabilities." }], implemented: false },
   { id: "hunting", name: "Hunting", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Opens the Forestry and Archery branches." }], implemented: true },
-  { id: "forestry", name: "Forestry", tier: 2, prerequisites: ["hunting"], effects: [{ type: "capability", description: "Future forestry improvements." }], implemented: false },
-  { id: "mathematics", name: "Mathematics", tier: 3, prerequisites: ["forestry"], effects: [{ type: "unlock-unit", description: "Catapult (coming soon)." }], implemented: false },
+  { id: "forestry", name: "Forestry", tier: 2, prerequisites: ["hunting"], effects: [{ type: "capability", description: "Opens the Mathematics branch." }], implemented: true },
+  { id: "mathematics", name: "Mathematics", tier: 3, prerequisites: ["forestry"], effects: [{ type: "unlock-unit", description: "Catapult recruitment." }], implemented: true },
   { id: "archery", name: "Archery", tier: 2, prerequisites: ["hunting"], effects: [{ type: "unlock-unit", description: "Archer recruitment." }], implemented: true },
   { id: "spiritualism", name: "Spiritualism", tier: 3, prerequisites: ["archery"], effects: [{ type: "capability", description: "Future spiritual capabilities." }], implemented: false },
   { id: "fishing", name: "Fishing", tier: 1, prerequisites: [], effects: [{ type: "capability", description: "Build Ports for 7 Gold on owned coastal Water. Move land units onto Ports to embark as Rafts." }], implemented: true },
