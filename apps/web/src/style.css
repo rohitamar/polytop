@@ -1018,3 +1018,8 @@ button:disabled { cursor: default; }
 .unit-info button:disabled { opacity: 0.55; cursor: default; }
 .unit-info small { display: block; }
 @media (max-width: 700px) { .peace-panel { left: 12px; top: 140px; width: 210px; } }
+
+.match-result-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: #15251bcc; padding: 20px; }
+.match-result { width: min(420px, 100%); padding: 32px; border-radius: 16px; background: #eff3e8; color: #243b2a; text-align: center; box-shadow: 0 16px 60px #0005; }
+.match-result h1 { margin-top: 0; }
+.match-result button { padding: 12px 24px; }

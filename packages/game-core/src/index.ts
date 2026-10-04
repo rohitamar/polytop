@@ -85,6 +85,7 @@ export type Unit = Position & {
   actionPhase?: "ready" | "moved" | "escape" | "complete";
 };
 export type GameState = {
+  outcome?: { eliminatedPlayerIds: string[]; winnerId: string | null };
   rules?: GameRules;
   peaceOffers?: { from: string; to: string }[];
   treaties?: { a: string; b: string }[];
@@ -240,6 +241,7 @@ export function createGame(seed = "fern-104", playerCount = 2, config: WorldConf
   placeResources(seed, tiles, world.width, world.height);
   for (const tile of tiles) if (cities.some(city => city.x === tile.x && city.y === tile.y)) delete tile.resource;
   const state: GameState = {
+    outcome: { eliminatedPlayerIds: [], winnerId: null },
     rules: { enabledUnitTypes: [...(config.rules ?? fullRuleset).enabledUnitTypes], enabledUnitAbilities: [...(config.rules ?? fullRuleset).enabledUnitAbilities] },
     seed,
     width: world.width,
@@ -300,7 +302,7 @@ export function getReachableTiles(
   unitId: string,
 ): ReachableTile[] {
   const unit = state.units.find((candidate) => candidate.id === unitId);
-  if (!unit || !isUnitEnabled(state.rules, unit.unitType) || unit.actionPhase === "complete" || (unit.hasAttacked && (unit.actionPhase !== "escape" || !hasUnitAbility(state.rules, unit.unitType, "ESCAPE"))) || unit.ownerId !== state.activePlayerId)
+  if (state.outcome?.winnerId || state.outcome?.eliminatedPlayerIds.includes(state.activePlayerId) || !unit || !isUnitEnabled(state.rules, unit.unitType) || unit.actionPhase === "complete" || (unit.hasAttacked && (unit.actionPhase !== "escape" || !hasUnitAbility(state.rules, unit.unitType, "ESCAPE"))) || unit.ownerId !== state.activePlayerId)
     return [];
   const start: ReachableTile = { x: unit.x, y: unit.y, cost: 0, path: [] };
   const visited = new Map<string, ReachableTile>([[positionKey(start), start]]);
@@ -378,7 +380,7 @@ const distance = gridDistance;
 
 export function getAttackTargets(state: GameState, unitId: string): Unit[] {
   const unit = state.units.find((candidate) => candidate.id === unitId);
-  if (!unit || unit.ownerId !== state.activePlayerId || unit.hasAttacked || unit.attack <= 0 || !isUnitEnabled(state.rules, unit.unitType) || unit.actionPhase === "complete" || (unit.actionPhase === "moved" && !hasUnitAbility(state.rules, unit.unitType, "DASH")))
+  if (state.outcome?.winnerId || state.outcome?.eliminatedPlayerIds.includes(state.activePlayerId) || !unit || unit.ownerId !== state.activePlayerId || unit.hasAttacked || unit.attack <= 0 || !isUnitEnabled(state.rules, unit.unitType) || unit.actionPhase === "complete" || (unit.actionPhase === "moved" && !hasUnitAbility(state.rules, unit.unitType, "DASH")))
     return [];
   const visible = computeVisibleTiles(state, unit.ownerId);
   return state.units.filter(
@@ -526,6 +528,8 @@ export const canRecruitUnit = (state: GameState, playerId: string, cityId: strin
 
 export function applyAction(state: GameState, action: GameAction): GameState {
   if (state.perspectiveId) throw new Error("Player views cannot apply authoritative actions");
+  if (state.outcome?.winnerId) throw new Error("The match has ended");
+  if (state.outcome?.eliminatedPlayerIds.includes(action.playerId)) throw new Error("You have been eliminated");
   let discovered = updatePlayerExploration(state);
   const transitioned = transition(state, action);
   const captures = transitioned.cities.filter(city => city.ownerId !== state.cities.find(previous => previous.id === city.id)?.ownerId);
@@ -540,7 +544,17 @@ export function applyAction(state: GameState, action: GameAction): GameState {
       discovered = updatePlayerExploration({ ...next, exploration: discovered.exploration, units: next.units.map(unit => unit.id === action.unitId ? { ...unit, ...position } : unit) });
     }
   }
-  return updatePlayerExploration({ ...next, exploration: action.type === "move" ? discovered.exploration : next.exploration });
+  let resolved = next;
+  if (state.outcome) {
+    const eliminatedPlayerIds = state.players.filter(player => state.outcome!.eliminatedPlayerIds.includes(player.id) || !next.cities.some(city => city.ownerId === player.id) && (state.cities.some(city => city.ownerId === player.id) || state.units.some(unit => unit.ownerId === player.id) && !next.units.some(unit => unit.ownerId === player.id))).map(player => player.id);
+    const survivors = state.players.filter(player => !eliminatedPlayerIds.includes(player.id));
+    resolved = { ...next, outcome: { eliminatedPlayerIds, winnerId: state.players.length > 1 && survivors.length === 1 ? survivors[0].id : null },
+      units: next.units.filter(unit => !eliminatedPlayerIds.includes(unit.ownerId)),
+      treaties: next.treaties?.filter(treaty => !eliminatedPlayerIds.includes(treaty.a) && !eliminatedPlayerIds.includes(treaty.b)),
+      peaceOffers: next.peaceOffers?.filter(offer => !eliminatedPlayerIds.includes(offer.from) && !eliminatedPlayerIds.includes(offer.to)) };
+  }
+  if (!resolved.outcome?.winnerId && resolved.outcome?.eliminatedPlayerIds.includes(resolved.activePlayerId)) resolved = { ...transition(resolved, { type: "END_TURN", playerId: resolved.activePlayerId }), revision: resolved.revision };
+  return updatePlayerExploration({ ...resolved, exploration: action.type === "move" ? discovered.exploration : resolved.exploration });
 }
 
 function transition(state: GameState, action: GameAction): GameState {
@@ -584,7 +598,7 @@ function transition(state: GameState, action: GameAction): GameState {
       }) };
   }
   if (action.type === "PROPOSE_PEACE" || action.type === "ACCEPT_PEACE" || action.type === "BREAK_PEACE") {
-    if (action.otherPlayerId === action.playerId || !state.players.some(player => player.id === action.otherPlayerId)) throw new Error("Invalid treaty player");
+    if (action.otherPlayerId === action.playerId || state.outcome?.eliminatedPlayerIds.includes(action.otherPlayerId) || !state.players.some(player => player.id === action.otherPlayerId)) throw new Error("Invalid treaty player");
     const offers = state.peaceOffers ?? [], treaties = state.treaties ?? [];
     if (action.type === "PROPOSE_PEACE") {
       if (!hasTechnology(state, action.playerId, "strategy") || areAtPeace(state, action.playerId, action.otherPlayerId) || offers.some(offer => offer.from === action.playerId && offer.to === action.otherPlayerId)) throw new Error("Cannot propose peace");
@@ -661,7 +675,7 @@ function transition(state: GameState, action: GameAction): GameState {
     return next;
   }
   if (action.type === "END_TURN") {
-    const nextPlayer = state.players[(playerIndex + 1) % state.players.length];
+    const nextPlayer = Array.from({ length: state.players.length }, (_, offset) => state.players[(playerIndex + offset + 1) % state.players.length]).find(player => !state.outcome?.eliminatedPlayerIds.includes(player.id))!;
     return {
       ...state,
       revision: state.revision + 1,

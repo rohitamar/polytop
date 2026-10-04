@@ -380,6 +380,26 @@ describe("lobby WebSocket server", () => {
       state = await act(clients, state, { type: "END_TURN" });
     }
     expect(state.units).toHaveLength(1);
+    const winner = state.units[0].ownerId;
+    const loser = state.players.find(player => player.id !== winner)!.id;
+    const city = state.cities.find(city => city.ownerId === loser)!;
+    for (let step = 0; step < 40 && !state.outcome?.winnerId; step++) {
+      if (state.activePlayerId !== winner) { state = await act(clients, state, { type: "END_TURN" }); continue; }
+      const unit = state.units[0];
+      const destination = getReachableTiles(state, unit.id).sort((a, b) => Math.abs(a.x - city.x) + Math.abs(a.y - city.y) - Math.abs(b.x - city.x) - Math.abs(b.y - city.y))[0];
+      if (destination) state = await act(clients, state, { type: "move", unitId: unit.id, to: { x: destination.x, y: destination.y } });
+      else state = await act(clients, state, { type: "END_TURN" });
+    }
+    expect(state.outcome).toEqual({ eliminatedPlayerIds: [loser], winnerId: winner });
+    const winnerIndex = state.players.findIndex(player => player.id === winner);
+    const loserIndex = 1 - winnerIndex;
+    clients[winnerIndex].send({ type: "GAME_ACTION", requestId: "after-victory", expectedRevision: state.revision, action: { type: "END_TURN" } });
+    expect(await clients[winnerIndex].next()).toMatchObject({ type: "ACTION_REJECTED", message: "The match has ended" });
+    clients[loserIndex].send({ type: "LEAVE_ROOM" });
+    expect((await clients[loserIndex].next()).type).toBe("LEFT_ROOM");
+    expect(await clients[winnerIndex].next()).toMatchObject({ type: "LOBBY_UPDATE", room: { players: [{ id: winner }] } });
+    clients[loserIndex].send({ type: "CREATE_ROOM", name: "Again" });
+    expect((await clients[loserIndex].next()).type).toBe("LOBBY_UPDATE");
   });
 
   it("validates recruitment on the server and rejects simultaneous and replayed spending", async () => {

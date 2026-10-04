@@ -48,6 +48,15 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
   const leave = (socket: WebSocket, intentional = false, room = memberships.get(socket)) => {
     if (!room || closing) return;
     if (room.state) {
+      const departing = room.members.find(member => member.socket === socket);
+      if (intentional && (room.state.outcome?.winnerId || departing && room.state.outcome?.eliminatedPlayerIds.includes(departing.player.id))) {
+        clearTimeout(departing?.expiry);
+        memberships.delete(socket);
+        room.members = room.members.filter(member => member !== departing);
+        if (room.members.length) broadcast(room);
+        else rooms.delete(room.code);
+        return;
+      }
       if (!intentional) {
         memberships.delete(socket);
         const member = room.members.find(member => member.socket === socket);

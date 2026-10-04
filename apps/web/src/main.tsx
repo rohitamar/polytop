@@ -102,7 +102,11 @@ function App() {
   const connectionReady = useRef(true);
   const [connected, setConnected] = useState(true);
   const [waiting, setWaiting] = useState(false);
-  const canAct = !networked || connected && network.current?.playerId === state.activePlayerId;
+  const [exitRequest, setExitRequest] = useState(0);
+  const [resultDismissed, setResultDismissed] = useState(false);
+  const defeated = !!state.outcome?.eliminatedPlayerIds.includes(state.perspectiveId ?? state.activePlayerId);
+  const finished = !!state.outcome?.winnerId;
+  const canAct = !defeated && !finished && (!networked || connected && network.current?.playerId === state.activePlayerId);
   const submit = (action: GameAction) => {
     if (!network.current || !networkMatch.current) return false;
     if (busy.current || !connectionReady.current) return true;
@@ -119,6 +123,7 @@ function App() {
   };
   const matchQueue = useRef(Promise.resolve());
   const receiveMatch = (message: Extract<LobbyServerMessage, { type: "MATCH_STATE" }>) => {
+    setResultDismissed(false);
     networkMatch.current = true;
     setNetworked(true);
     connectionReady.current = true;
@@ -231,6 +236,7 @@ function App() {
   };
   const reset = (seed = authority.current!.seed) => {
     if (busy.current || networkMatch.current) return;
+    setResultDismissed(false);
     authority.current = createGame(seed, 2, { scenario: "demo" });
     stateRef.current = getPlayerView(authority.current, authority.current.activePlayerId);
     setState(stateRef.current);
@@ -526,8 +532,13 @@ function App() {
         ref={canvas}
         aria-label="Interactive 3D expedition map. Click the warrior, then a highlighted tile to move."
       />
+      {(defeated || finished) && !resultDismissed && !moving && <div className="match-result-backdrop"><section className="match-result" role="dialog" aria-modal="true" aria-labelledby="match-result-title">
+        <h1 id="match-result-title">{defeated ? "You lost" : networked ? "You won!" : `${state.players.find(player => player.id === state.outcome?.winnerId)?.name} won!`}</h1>
+        <p>{defeated ? "Your last city was captured. Your civilization has been eliminated." : "Your civilization is the last one standing."}</p>
+        <button disabled={waiting} onClick={() => { setResultDismissed(true); setShowTechnologies(false); stopRoadPlacement(); select(null); if (networked) setExitRequest(value => value + 1); else reset(); }}>{networked ? "Return to lobby" : "Play again"}</button>
+      </section></div>}
       <header className="topbar">
-        <Lobby onMatch={receiveMatch} onSession={(playerId, send) => { network.current = { playerId, send }; }} onEnd={(reason, ended) => {
+        <Lobby exitRequest={exitRequest} onMatch={receiveMatch} onSession={(playerId, send) => { network.current = { playerId, send }; }} onEnd={(reason, ended) => {
           busy.current = false;
           setWaiting(false);
           setNotice(reason);

@@ -104,6 +104,7 @@ export function getPlayerView(state: GameState, playerId: string): PlayerView {
   const memory = refreshed.exploration![playerId];
   const visible = new Set(memory.visibleTiles);
   return {
+    outcome: state.outcome ? structuredClone(state.outcome) : undefined,
     rules: state.rules ? structuredClone(state.rules) : undefined,
     treaties: structuredClone(state.treaties ?? []),
     peaceOffers: (state.peaceOffers ?? []).filter(offer => offer.from === playerId || offer.to === playerId).map(offer => ({ ...offer })),

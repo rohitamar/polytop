@@ -8,7 +8,8 @@ import {
 } from "@reach/protocol";
 import { connectLobby } from "./lobby-client";
 
-export function Lobby({ onMatch, onSession, onEnd }: {
+export function Lobby({ onMatch, onSession, onEnd, exitRequest = 0 }: {
+  exitRequest?: number;
   onMatch: (message: Extract<LobbyServerMessage, { type: "MATCH_STATE" }>) => void;
   onSession: (playerId: string, send: (message: LobbyClientMessage) => Promise<void>) => void;
   onEnd: (reason: string, ended?: boolean) => void;
@@ -72,7 +73,10 @@ export function Lobby({ onMatch, onSession, onEnd }: {
             if (response.type === "LEFT_ROOM") {
               sessionStorage.removeItem("polytop-session");
               setRoom(null);
+              setInMatch(false);
+              setOpen(true);
               setPlayerId("");
+              callbacks.current.onEnd("You left the match.", true);
             }
             if (response.type === "LOBBY_ERROR") { setError(response.message); callbacks.current.onEnd(response.message); }
           },
@@ -117,6 +121,10 @@ export function Lobby({ onMatch, onSession, onEnd }: {
     const saved = sessionStorage.getItem("polytop-session");
     if (saved) void request({ type: "RESUME_MATCH", ...JSON.parse(saved) });
   }, []);
+
+  useEffect(() => {
+    if (exitRequest) void request({ type: "LEAVE_ROOM" });
+  }, [exitRequest]);
 
   return (
     <div className="lobby-shell">
