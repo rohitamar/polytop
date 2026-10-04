@@ -25,6 +25,7 @@ describe("lobby WebSocket server", () => {
     socket.on("message", (data) => {
       const message = parseLobbyServerMessage(JSON.parse(data.toString()));
       if (!message) throw new Error("Invalid server response");
+      if (message.type === "MATCH_SESSION") return;
       const waiter = waiters.shift();
       if (waiter) waiter(message);
       else queue.push(message);

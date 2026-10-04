@@ -28,6 +28,12 @@ test("two players preview, attack, retaliate and finish a duel through pointer c
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
   await page.evaluate(() => window.__GAME_DEBUG__!.setSeed("fern-104"));
   await unit(page, "warrior-1");
+  await tile(page, 5, 5);
+  await page.getByRole("button", { name: "End Turn", exact: true }).click();
+  await unit(page, "warrior-2");
+  await tile(page, 7, 4);
+  await page.getByRole("button", { name: "End Turn", exact: true }).click();
+  await unit(page, "warrior-1");
   await tile(page, 6, 5);
   await page.getByRole("button", { name: "End Turn", exact: true }).click();
   await unit(page, "warrior-2");
@@ -151,7 +157,7 @@ test("two players preview, attack, retaliate and finish a duel through pointer c
     await page.evaluate(() => window.__GAME_DEBUG__!.getVisualPosition()),
   ).toMatchObject({ x: 6, y: 5 });
   await page.getByRole("button", { name: "End Turn", exact: true }).click();
-  await expect(page.getByText("No warriors remain for Sunward.")).toBeVisible();
+  await expect(page.getByText("No units remain for Sunward.")).toBeVisible();
   await page.getByRole("button", { name: "End Turn", exact: true }).click();
   await unit(page, "warrior-2");
   await page.screenshot({ path: testInfo.outputPath("duel-finished.png") });

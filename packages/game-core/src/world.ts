@@ -1,4 +1,4 @@
-import type { Position, Terrain, Tile } from "./index";
+import type { Position, Tile } from "./index";
 
 export const mapSizes = [
   { maxPlayers: 2, size: 20 },
@@ -56,7 +56,7 @@ function noise(seed: string, width: number, height: number, scale: number) {
     return 0.5 + (top * (1 - fy) + bottom * fy) * 0.5;
   };
 }
-function growForests(seed: string, tiles: Tile[], width: number, height: number, target: number, excluded: Set<number>) {
+function scatterForests(seed: string, tiles: Tile[], width: number, height: number, target: number, excluded: Set<number>) {
   const random = randomFromSeed(seed);
   const eligible = tiles.filter(tile => tile.terrain === "grass" && !excluded.has(tile.y * width + tile.x));
   for (let i = eligible.length - 1; i > 0; i--) {
@@ -64,22 +64,16 @@ function growForests(seed: string, tiles: Tile[], width: number, height: number,
     [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
   }
   let count = tiles.filter(tile => tile.terrain === "forest").length;
-  for (const seedTile of eligible) {
-    if (count >= target) break;
-    if (seedTile.terrain !== "grass") continue;
-    const frontier = [seedTile];
-    let remaining = 3 + Math.floor(random() * 5);
-    while (frontier.length && remaining > 0 && count < target) {
-      const [tile] = frontier.splice(Math.floor(random() * frontier.length), 1);
-      const index = tile.y * width + tile.x;
-      if (tile.terrain !== "grass" || excluded.has(index)) continue;
+  for (const separated of [true, false]) {
+    for (const tile of eligible) {
+      if (count >= target) return;
+      if (tile.terrain !== "grass") continue;
+      if (separated && [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([dx, dy]) => {
+        const x = tile.x + dx, y = tile.y + dy;
+        return x >= 0 && y >= 0 && x < width && y < height && tiles[y * width + x].terrain === "forest";
+      })) continue;
       tile.terrain = "forest";
       count++;
-      remaining--;
-      for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
-        const x = tile.x + dx, y = tile.y + dy;
-        if (x >= 0 && y >= 0 && x < width && y < height) frontier.push(tiles[y * width + x]);
-      }
     }
   }
 }
@@ -107,7 +101,7 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
     const roll = mountains();
     if (tile.terrain === "grass" && roll < rules.mountainCoverage) tile.terrain = "mountain";
   }
-  growForests(seed + ":forests", tiles, width, height, Math.round(tiles.length * rules.forestCoverage), new Set());
+  scatterForests(seed + ":forests", tiles, width, height, Math.round(tiles.length * rules.forestCoverage), new Set());
   const interior = tiles.filter(tile => tile.x >= rules.safeRadius + 1 && tile.y >= rules.safeRadius + 1 && tile.x < width - rules.safeRadius - 1 && tile.y < height - rules.safeRadius - 1);
   const land = new Set<number>();
   const seen = new Set<number>();
@@ -161,10 +155,9 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
     if (config.scenario === "demo") {
       if (starts.some(start => distance(start, tile) <= rules.safeRadius) || villages.some(city => distance(city, tile) <= 1)) tile.terrain = "grass";
     } else {
-      const nearStart = starts.some(start => distance(start, tile) <= rules.safeRadius);
       const center = [...starts, ...villages].some(city => distance(city, tile) === 0);
       const immediateStart = starts.some(start => distance(start, tile) <= 1);
-      if (center || nearStart && tile.terrain === "water" || immediateStart && tile.terrain === "mountain") tile.terrain = "grass";
+      if (center || immediateStart && (tile.terrain === "water" || tile.terrain === "mountain")) tile.terrain = "grass";
     }
   }
   const routes = new Set<number>();
@@ -210,12 +203,30 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
     tiles[5 * width + 7].terrain = "grass";
   }
   const reserved = new Set(routes);
-  for (const tile of tiles) if (starts.some(start => distance(start, tile) <= rules.safeRadius) || villages.some(city => distance(city, tile) === 0)) reserved.add(tile.y * width + tile.x);
+  for (const tile of tiles) if (starts.some(start => distance(start, tile) <= 1) || villages.some(city => distance(city, tile) === 0)) reserved.add(tile.y * width + tile.x);
   if (config.scenario === "demo") for (const [x, y] of [[4, 3], [4, 4], [7, 4], [7, 5]]) reserved.add(y * width + x);
   let waters = tiles.filter(tile => tile.terrain === "water").length;
   for (const index of ranked) {
     if (waters >= waterTarget) break;
     if (!reserved.has(index) && tiles[index].terrain !== "water") { tiles[index].terrain = "water"; waters++; }
+  }
+  if (waterTarget > 0) for (const start of starts) {
+    const belongsToStart = (tile: Position) => distance(start, tile) <= 2 && [...starts, ...villages].every(city => city === start || distance(city, tile) > distance(start, tile));
+    const coast = (tile: Position) => [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([dx, dy]) => {
+      const neighbor = tiles[(tile.y + dy) * width + tile.x + dx];
+      return neighbor?.x === tile.x + dx && neighbor.y === tile.y + dy && neighbor.terrain !== "water";
+    });
+    if (tiles.some(tile => tile.terrain === "water" && belongsToStart(tile) && coast(tile))) continue;
+    const shore = ranked.map(index => tiles[index]).find(tile => belongsToStart(tile) && distance(start, tile) === 2 && !reserved.has(tile.y * width + tile.x) && coast(tile));
+    const donor = ranked.map(index => tiles[index]).find(tile => tile.terrain === "water" && starts.every(city => distance(city, tile) > 2) && villages.every(city => distance(city, tile) > 1));
+    if (shore && donor) { shore.terrain = "water"; donor.terrain = "grass"; }
+  }
+  const coastal = villages.some(city => tiles.some(tile => tile.terrain === "water" && distance(city, tile) === 1));
+  if (waterTarget > 0 && !coastal) {
+    const shore = tiles.find(tile => tile.terrain === "grass" && !routes.has(tile.y * width + tile.x) &&
+      !starts.some(start => distance(start, tile) <= rules.safeRadius) && villages.some(city => distance(city, tile) === 1));
+    const inlandWater = tiles.find(tile => tile.terrain === "water" && !routes.has(tile.y * width + tile.x) && starts.every(start => distance(start, tile) > 2));
+    if (shore && inlandWater) { shore.terrain = "water"; inlandWater.terrain = "grass"; }
   }
   const centers = new Set([...starts, ...villages].map(city => city.y * width + city.x));
   if (config.scenario === "demo") for (const [x, y] of [[4, 3], [7, 4], [7, 5]]) centers.add(y * width + x);
@@ -234,7 +245,7 @@ export function generateWorld(seed: string, playerCount: number, config: WorldCo
   const forestTarget = Math.round(tiles.length * rules.forestCoverage);
   const existingForest = tiles.filter(tile => tile.terrain === "forest");
   for (const tile of existingForest.slice(forestTarget)) tile.terrain = "grass";
-  growForests(seed + ":forest-balance", tiles, width, height, forestTarget, centers);
+  scatterForests(seed + ":forest-balance", tiles, width, height, forestTarget, centers);
   return { width, height, starts, villages, tiles };
 }
 

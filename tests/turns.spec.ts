@@ -40,13 +40,13 @@ test("two owners move on their turns, reject enemy control and regain movement",
   await expect
     .poll(() => page.evaluate(() => window.__GAME_DEBUG__!.getSelectedUnitId()))
     .toBe("warrior-1");
-  await clickTile(page, 6, 5);
+  await clickTile(page, 5, 5);
   await expect
     .poll(() => page.evaluate(() => window.__GAME_DEBUG__!.isAnimating()))
     .toBe(false);
   expect(
     await page.evaluate(() => window.__GAME_DEBUG__!.getUnits()[0]),
-  ).toMatchObject({ x: 6, y: 5, movement: 0, ownerId: "player-1" });
+  ).toMatchObject({ x: 5, y: 5, movement: 0, ownerId: "player-1" });
   await expect(
     page.getByText("Movement spent. End your turn.", { exact: true }),
   ).toBeVisible();
@@ -79,7 +79,7 @@ test("two owners move on their turns, reject enemy control and regain movement",
   await expect(page.getByTestId("turn-number")).toHaveText("2");
   const second = await page.evaluate(() => window.__GAME_DEBUG__!.getState());
   expect(second.activePlayerId).toBe("player-2");
-  expect(second.units.map((unit) => unit.movement)).toEqual([0, 2]);
+  expect(second.units.map((unit) => unit.movement)).toEqual([0, 1]);
   await clickUnit(page, "warrior-1");
   await expect(page.getByRole("status")).toContainText(
     "Sunward's warrior is waiting",
@@ -106,7 +106,7 @@ test("two owners move on their turns, reject enemy control and regain movement",
     .toBe(false);
   expect(
     await page.evaluate(() => window.__GAME_DEBUG__!.getUnits()[1]),
-  ).toMatchObject({ x: 7, y: 4, movement: 1, ownerId: "player-2" });
+  ).toMatchObject({ x: 7, y: 4, movement: 0, ownerId: "player-2" });
   expect(
     await page.evaluate(() =>
       window.__GAME_DEBUG__!.getVisualPosition("warrior-2"),
@@ -119,7 +119,7 @@ test("two owners move on their turns, reject enemy control and regain movement",
     turnNumber: 3,
     revision: 4,
   });
-  expect(third.units.map((unit) => unit.movement)).toEqual([2, 1]);
+  expect(third.units.map((unit) => unit.movement)).toEqual([1, 0]);
   expect(
     await page.evaluate(() => window.__GAME_DEBUG__!.getSelectedUnitId()),
   ).toBeNull();
@@ -127,13 +127,13 @@ test("two owners move on their turns, reject enemy control and regain movement",
     await page.evaluate(() => window.__GAME_DEBUG__!.getMarkerCount()),
   ).toBe(0);
   await clickUnit(page, "warrior-1");
-  await clickTile(page, 5, 5);
+  await clickTile(page, 6, 5);
   await expect
     .poll(() => page.evaluate(() => window.__GAME_DEBUG__!.isAnimating()))
     .toBe(false);
   expect(
     await page.evaluate(() => window.__GAME_DEBUG__!.getUnits()[0]),
-  ).toMatchObject({ x: 5, y: 5, movement: 1 });
+  ).toMatchObject({ x: 6, y: 5, movement: 0 });
   await testInfo.attach("Tideward turn and ownership styling", {
     path: testInfo.outputPath("tideward-turn.png"),
     contentType: "image/png",

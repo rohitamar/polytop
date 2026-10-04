@@ -33,8 +33,8 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
   await expect
     .poll(() => page.evaluate(() => window.__GAME_DEBUG__!.getMarkerCount()))
     .toBe(legal.length);
-  const destination = legal.find((tile) => tile.x === 6 && tile.y === 5)!;
-  expect(destination.cost).toBe(2);
+  const destination = legal.find((tile) => tile.x === 5 && tile.y === 5)!;
+  expect(destination.cost).toBe(1);
   const tilePoint = await page.evaluate(
     ({ x, y }) => window.__GAME_DEBUG__!.getTileScreenPosition(x, y),
     destination,
@@ -42,7 +42,7 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
   await page.mouse.move(tilePoint.x, tilePoint.y);
   await expect
     .poll(() => page.evaluate(() => window.__GAME_DEBUG__!.getHoveredTile()))
-    .toBe("6,5");
+    .toBe("5,5");
   await page.screenshot({ path: testInfo.outputPath("01-selected-map.png") });
   await page.evaluate(() => {
     const samples: {
@@ -101,7 +101,7 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
       (sample) =>
         sample.animating &&
         sample.x > 4 &&
-        sample.x < 6 &&
+        sample.x < 5 &&
         sample.elevation > 0.14,
     ),
   ).toBe(true);
@@ -111,10 +111,10 @@ test("selects, highlights and animates a legal move using actual canvas clicks",
       .every((sample) => sample.turnLocked && sample.turnNumber === 1),
   ).toBe(true);
   const state = await page.evaluate(() => window.__GAME_DEBUG__!.getState());
-  expect(state.units[0]).toMatchObject({ x: 6, y: 5, movement: 0 });
+  expect(state.units[0]).toMatchObject({ x: 5, y: 5, movement: 0 });
   expect(
     await page.evaluate(() => window.__GAME_DEBUG__!.getVisualPosition()),
-  ).toMatchObject({ x: 6, y: 5 });
+  ).toMatchObject({ x: 5, y: 5 });
   await page.screenshot({
     path: testInfo.outputPath("02-movement-complete.png"),
   });
@@ -131,9 +131,8 @@ test("rejects blocked moves, protects debug snapshots, resets seed and supports 
 }) => {
   await page.goto("/");
   await page.waitForFunction(() => !!window.__GAME_DEBUG__);
-  await page
-    .getByRole("button", { name: "Select warrior", exact: true })
-    .click();
+  const unitPoint = await page.evaluate(() => window.__GAME_DEBUG__!.getUnitScreenPosition());
+  await page.mouse.click(unitPoint.x, unitPoint.y);
   const before = await page.evaluate(() => window.__GAME_DEBUG__!.getState());
   const blocked =
     before.tiles.find(

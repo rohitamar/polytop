@@ -43,8 +43,8 @@ describe("cities and economy", () => {
         expect(
           state.cities.filter((city) => city.ownerId === player.id),
         ).toHaveLength(1);
-        expect(getIncome(state, player.id)).toBe(2);
-        expect(player.resources.gold).toBe(player.id === state.activePlayerId ? 2 : 0);
+        expect(getIncome(state, player.id)).toBeGreaterThanOrEqual(2);
+        expect(player.resources.gold).toBe(player.id === state.activePlayerId ? getIncome(state, player.id) : 0);
       }
     },
   );
@@ -56,12 +56,10 @@ describe("cities and economy", () => {
     expect(
       captured.cities.find((city) => city.id === "neutral-1")?.ownerId,
     ).toBe("player-1");
-    expect(getIncome(captured, "player-1")).toBe(4);
-    expect(captured.players[0].resources.gold).toBe(2);
-    expect(end(captured).players.map((player) => player.resources.gold)).toEqual([2, 2]);
-    expect(end(end(captured)).players.map((player) => player.resources.gold)).toEqual([
-      6, 2,
-    ]);
+    expect(getIncome(captured, "player-1")).toBeGreaterThan(getIncome(initial, "player-1"));
+    expect(captured.players[0].resources.gold).toBe(initial.players[0].resources.gold);
+    expect(end(captured).players[0].resources.gold).toBe(initial.players[0].resources.gold);
+    expect(end(end(captured)).players[0].resources.gold).toBe(initial.players[0].resources.gold + getIncome(captured, "player-1"));
     expect(initial).toEqual(snapshot);
   });
 
@@ -72,22 +70,22 @@ describe("cities and economy", () => {
       x: 5,
       y: 5,
       townHallLevel: 3,
-      population: 3,
     };
     initial.cities = initial.cities.filter((city) => city.id !== "neutral-1");
     const captured = move(initial);
     expect(captured.cities[1]).toMatchObject({
       ownerId: "player-1",
       townHallLevel: 3,
-      population: 3,
     });
     expect(getIncome(captured, "player-2")).toBe(0);
     expect(end(captured).players[1].resources.gold).toBe(0);
-    expect(end(end(captured)).players[0].resources.gold).toBe(9);
+    expect(end(end(captured)).players[0].resources.gold).toBe(initial.players[0].resources.gold + getIncome(captured, "player-1"));
   });
 
   it("captures every city entered along an accepted movement path", () => {
-    const state = move(createGame(), 6, 5);
+    const initial = createGame();
+    initial.units[0].movement = 2;
+    const state = move(initial, 6, 5);
     expect(state.cities.find((city) => city.id === "neutral-1")?.ownerId).toBe(
       "player-1",
     );
@@ -110,14 +108,14 @@ describe("cities and economy", () => {
   it("charges centralized upgrade costs and pays the new income next turn", () => {
     const initial = end(end(createGame()));
     const next = upgrade(initial);
-    expect(initial.players[0].resources.gold).toBe(4);
-    expect(next.players[0].resources.gold).toBe(0);
-    expect(next.cities[0]).toMatchObject({ townHallLevel: 2, population: 3 });
+    expect(initial.players[0].resources.gold).toBe(getIncome(initial, "player-1") * 2);
+    expect(next.players[0].resources.gold).toBe(initial.players[0].resources.gold - 4);
+    expect(next.cities[0]).toMatchObject({ townHallLevel: 2 });
     expect(getUpgradeCost(next.cities[0])).toBe(8);
     const funded = end(end(end(end(end(end(next))))));
     const max = upgrade(funded);
-    expect(max.players[0].resources.gold).toBe(1);
-    expect(max.cities[0]).toMatchObject({ townHallLevel: 3, population: 3 });
+    expect(max.players[0].resources.gold).toBe(funded.players[0].resources.gold - 8);
+    expect(max.cities[0]).toMatchObject({ townHallLevel: 3 });
     expect(getUpgradeCost(max.cities[0])).toBeNull();
     expect(() => upgrade(max)).toThrow("maximum");
     expect(next.revision).toBe(initial.revision + 1);
@@ -127,6 +125,7 @@ describe("cities and economy", () => {
     "rejects %s upgrades without mutation",
     (scenario) => {
       const state = createGame();
+      if (scenario === "poor") state.players[0].resources.gold = 0;
       const before = structuredClone(state);
       const city =
         scenario === "enemy"
@@ -151,10 +150,10 @@ describe("cities and economy", () => {
       for (const player of state.players)
         expect(player.resources.gold).toBe(
           before.players.find((p) => p.id === player.id)!.resources.gold +
-            (player.id === state.activePlayerId ? 2 : 0),
+            (player.id === state.activePlayerId ? getIncome(state, player.id) : 0),
         );
     }
     expect(state.activePlayerId).toBe("player-1");
-    expect(state.players[0].resources.gold).toBe(4);
+    expect(state.players[0].resources.gold).toBe(getIncome(state, "player-1") * 2);
   });
 });

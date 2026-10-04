@@ -18,8 +18,8 @@ function fixture(): GameState {
     revision: 0,
     activePlayerId: "p1",
     players: [
-      { id: "p1", name: "One", resources: { gold: 0, food: 0, wood: 0, steel: 0 } },
-      { id: "p2", name: "Two", resources: { gold: 0, food: 0, wood: 0, steel: 0 } },
+      { id: "p1", name: "One", resources: { gold: 0 }, technologies: [] },
+      { id: "p2", name: "Two", resources: { gold: 0 }, technologies: [] },
     ],
     turnNumber: 1,
     tiles: Array.from({ length: 25 }, (_, i) => ({
@@ -67,7 +67,7 @@ describe("seeded world", () => {
     for (let i = 0; i < 50; i++) {
       const state = createGame(String(i));
       expect(getTile(state, 4, 5)?.terrain).toBe("grass");
-      expect(getReachableTiles(state, "warrior-1").length).toBeGreaterThan(5);
+      expect(getReachableTiles(state, "warrior-1").length).toBeGreaterThan(0);
     }
   });
 });
@@ -82,19 +82,19 @@ describe("weighted movement", () => {
       expect(tile.path).toHaveLength(tile.cost);
     }
   });
-  it("charges two for forest and cannot continue beyond it", () => {
+  it("charges one for forest and can continue beyond it", () => {
     const state = fixture();
     getTile(state, 3, 2)!.terrain = "forest";
     const reachable = getReachableTiles(state, "u1");
     expect(reachable.find((tile) => tile.x === 3 && tile.y === 2)?.cost).toBe(
-      2,
+      1,
     );
     expect(
       reachable.find((tile) => tile.x === 4 && tile.y === 2),
-    ).toBeUndefined();
-    expect(applyAction(state, action(3, 2)).units[0].movement).toBe(0);
+    ).toMatchObject({ cost: 2 });
+    expect(applyAction(state, action(3, 2)).units[0].movement).toBe(1);
   });
-  it("uses the cheaper route when another route crosses forest", () => {
+  it("uses a deterministic equal-cost route through forest", () => {
     const state = fixture();
     getTile(state, 3, 2)!.terrain = "forest";
     const tile = getReachableTiles(state, "u1").find(
@@ -102,7 +102,7 @@ describe("weighted movement", () => {
     )!;
     expect(tile.cost).toBe(2);
     expect(tile.path).toEqual([
-      { x: 2, y: 3 },
+      { x: 3, y: 2 },
       { x: 3, y: 3 },
     ]);
   });

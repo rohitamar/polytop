@@ -30,6 +30,8 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import "@babylonjs/core/Culling/ray";
 import {
+  isRoadConnected,
+  getPortBuildingReason,
   getTerritory,
   getTile,
   getReachableTiles,
@@ -160,6 +162,13 @@ export function createWorld(
   const ringMaterials = Array.from({ length: 8 }, (_, i) => i).map((index) =>
     material(`ring-${index}`, playerStyle(index).ring),
   );
+  const territoryMaterials = Array.from({ length: 8 }, (_, index) => {
+    const border = material(`territory-${index}`, playerStyle(index).accent);
+    border.diffuseColor = border.diffuseColor.scale(0.55);
+    border.emissiveColor = border.diffuseColor;
+    border.disableLighting = true;
+    return border;
+  });
   const armor = material("ivory", "#ece5c9");
   const dark = material("ink", "#344f50");
   const face = material("skin", "#dca778");
@@ -206,10 +215,10 @@ export function createWorld(
   const ownerRings = new Map<string, Mesh>();
   const tileHeight = (tile?: Tile) =>
     tile?.terrain === "water" ? -0.12 : 0.13;
-  const tilePoint = (p: Position) =>
+  const tilePoint = (p: Position, surface = false) =>
     new Vector3(
       p.x - (currentState.width - 1) / 2,
-      tileHeight(getTile(currentState, p.x, p.y)),
+      tileHeight(getTile(currentState, p.x, p.y)) + (surface && getTile(currentState, p.x, p.y)?.terrain === "mountain" ? 1.05 : 0),
       p.y - (currentState.height - 1) / 2,
     );
   const solid = (
@@ -307,6 +316,39 @@ export function createWorld(
     blade.rotation.z = -0.15;
     const guard = box("guard", 0.23, 0.065, 0.08, gold, warrior);
     guard.position.set(0.26, 0.34, -0.05);
+    if (unit.unitType === "archer") {
+      shield.setEnabled(false);
+      emblem.setEnabled(false);
+      blade.setEnabled(false);
+      guard.setEnabled(false);
+      const bow = solid(CreateTorus("bow", { diameter: 0.48, thickness: 0.025, tessellation: 12 }, scene), bark, warrior);
+      bow.rotation.x = Math.PI / 2;
+      bow.position.set(0.3, 0.58, -0.05);
+      const string = box("bow string", 0.015, 0.48, 0.015, snow, warrior);
+      string.position.copyFrom(bow.position);
+    } else if (unit.unitType === "rider") {
+      const mount = box("mount", 0.42, 0.3, 0.72, bark, warrior);
+      mount.position.set(0, 0.3, 0.05);
+      const head = box("mount head", 0.19, 0.3, 0.26, bark, warrior);
+      head.position.set(0, 0.42, -0.36);
+    } else if (unit.unitType === "sailor") {
+      shield.setEnabled(false);
+      emblem.setEnabled(false);
+      blade.setEnabled(false);
+      guard.setEnabled(false);
+      const hull = box("sailor hull", 0.65, 0.23, 0.90, bark, warrior);
+      hull.position.y = 0.08;
+      const mast = box("sailor mast", 0.035, 1.2, 0.035, bark, warrior);
+      mast.position.set(0, 0.68, 0.27);
+      const sail = box("sailor sail", 0.50, 0.52, 0.025, cloak, warrior);
+      sail.position.set(0.20, 0.96, 0.27);
+    } else if (unit.unitType === "swordsman") {
+      blade.scaling.set(1.7, 1.3, 1.7);
+      shield.scaling.set(1.2, 1.2, 1.2);
+    }
+    const raft = box(`raft-${unit.id}`, 0.78, 0.18, 0.95, bark, warrior);
+    raft.position.y = 0.06;
+    raft.setEnabled(!!unit.embarked);
     for (const mesh of warrior.getChildMeshes()) {
       mesh.isPickable = true;
       mesh.metadata = { unitId: unit.id };
@@ -344,7 +386,8 @@ export function createWorld(
     label.billboardMode = Mesh.BILLBOARDMODE_ALL;
     healthLabels.set(unit.id, labelTexture);
     warriors.set(unit.id, warrior);
-    warrior.position.copyFrom(tilePoint(unit));
+    warrior.position.copyFrom(tilePoint(unit, true));
+    shadowDirty = true;
   };
   const halo = solid(
     CreateTorus(
@@ -388,7 +431,7 @@ export function createWorld(
       ? currentState?.tiles.find(
           (t) => t.x === pickedUnit.x && t.y === pickedUnit.y,
         )
-      : (metadata?.tile as Tile | undefined);
+      : metadata?.tile ? getTile(currentState, metadata.tile.x, metadata.tile.y) : undefined;
     if (info.type === PointerEventTypes.POINTERMOVE) {
       const key = tile ? positionKey(tile) : "";
       if (key !== hoveredKey) {
@@ -397,7 +440,7 @@ export function createWorld(
       }
       hover.setEnabled(!!tile);
       if (tile)
-        hover.position.copyFrom(tilePoint(tile).add(new Vector3(0, 0.027, 0)));
+        hover.position.copyFrom(tilePoint(tile, true).add(new Vector3(0, 0.027, 0)));
       canvas.style.cursor =
         pickedUnit &&
         pickedUnit.ownerId !== currentState.activePlayerId &&
@@ -473,9 +516,13 @@ export function createWorld(
         const peak = cone("mountain", 1.08, 0.91, rock);
         peak.position.set(point.x, point.y + 0.54, point.z);
         peak.rotation.y = tile.x;
+        peak.isPickable = true;
+        peak.metadata = { tile };
         const cap = cone("snowcap", 0.33, 0.28, snow);
         cap.position.set(point.x, point.y + 0.93, point.z);
         cap.rotation.y = tile.x;
+        cap.isPickable = true;
+        cap.metadata = { tile };
       }
       if (tile.terrain === "water") {
         for (let i = 0; i < 2; i++) {
@@ -538,14 +585,15 @@ export function createWorld(
       batch.indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
     };
     for (const tile of claims) {
-      if (!tile.cityId) continue;
+      if (!tile.cityId || !tile.playerId) continue;
       const point = tilePoint(tile);
       const index = state.players.findIndex(player => player.id === tile.playerId);
-      const mat = index < 0 ? neutral : accents[index];
+      if (index < 0) continue;
+      const mat = territoryMaterials[index];
       for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
         const neighbor = byPosition.get(positionKey({ x: tile.x + dx, y: tile.y + dy }));
         if (neighbor?.cityId && neighbor.playerId === tile.playerId) continue;
-        quad(mat, point.x + dx * 0.465, point.y + 0.035, point.z + dy * 0.465, dx ? 0.045 : 0.97, dy ? 0.045 : 0.97);
+        quad(mat, point.x + dx * 0.465, point.y + 0.035, point.z + dy * 0.465, dx ? 0.085 : 0.97, dy ? 0.085 : 0.97);
       }
       if (tile.cityId === cityId) quad(moveMaterial, point.x, point.y + 0.022, point.z, 0.91, 0.91);
     }
@@ -562,12 +610,75 @@ export function createWorld(
       territoryMeshes.push(mesh);
     }
   };
+  const roadMeshes = new Map<string, { node: TransformNode; signature: string }>();
+  const updateRoads = (state: GameState) => {
+    for (const [key, model] of roadMeshes) {
+      if (!state.tiles.some(tile => positionKey(tile) === key && tile.road)) { model.node.dispose(); roadMeshes.delete(key); }
+    }
+    const connected = (x: number, y: number) => isRoadConnected(state, { x, y });
+    for (const tile of state.tiles.filter(tile => tile.road)) {
+      const edges = [[0, -1], [1, 0], [0, 1], [-1, 0]].filter(([dx, dy]) => connected(tile.x + dx, tile.y + dy));
+      const key = positionKey(tile);
+      const signature = `${state.width}:${state.height}:${edges.map(edge => edge.join(",")).join(";")}`;
+      if (roadMeshes.get(key)?.signature === signature) continue;
+      roadMeshes.get(key)?.node.dispose();
+      const node = new TransformNode(`road-${key}`, scene);
+      node.position.copyFrom(tilePoint(tile));
+      box("road center", 0.28, 0.035, 0.28, snow, node).position.y = 0.045;
+      for (const [dx, dy] of edges) {
+        const edge = box("road segment", dx ? 0.5 : 0.22, 0.035, dy ? 0.5 : 0.22, snow, node);
+        edge.position.set(dx * 0.25, 0.045, dy * 0.25);
+      }
+      for (const mesh of node.getChildMeshes()) mesh.isPickable = false;
+      roadMeshes.set(key, { node, signature });
+    }
+  };
+  const portMeshes = new Map<string, TransformNode>();
+  const updatePorts = (state: GameState) => {
+    for (const [key, node] of portMeshes) if (!state.tiles.some(tile => tile.port && positionKey(tile) === key)) { node.dispose(); portMeshes.delete(key); }
+    for (const tile of state.tiles.filter(tile => tile.port)) {
+      const key = positionKey(tile);
+      if (portMeshes.has(key)) continue;
+      const node = new TransformNode(`port-${key}`, scene);
+      node.position.copyFrom(tilePoint(tile));
+      box("port dock", 0.8, 0.12, 0.7, bark, node).position.y = 0.08;
+      for (const x of [-0.32, 0.32]) for (const z of [-0.26, 0.26]) box("port piling", 0.08, 0.4, 0.08, bark, node).position.set(x, 0.16, z);
+      for (const mesh of node.getChildMeshes()) mesh.isPickable = false;
+      portMeshes.set(key, node);
+    }
+  };
+  const portHighlightMaterial = material("port site", "#ffbf36");
+  portHighlightMaterial.disableLighting = true;
+  portHighlightMaterial.emissiveColor = Color3.FromHexString("#ffbf36");
+  let portPlacementPlayer: string | null = null;
+  let portMarkers: AbstractMesh[] = [];
+  const updatePortHighlights = (state: GameState) => {
+    portMarkers.forEach(mesh => mesh.dispose());
+    portMarkers = [];
+    if (!portPlacementPlayer) return;
+    for (const tile of state.tiles) {
+      if (getPortBuildingReason(state, portPlacementPlayer, tile) !== null) continue;
+      const marker = solid(CreateTorus("legal port", { diameter: 0.8, thickness: 0.065, tessellation: 24 }, scene), portHighlightMaterial, root, false);
+      marker.position.copyFrom(tilePoint(tile));
+      marker.position.y += 0.065;
+      marker.isPickable = false;
+      portMarkers.push(marker);
+    }
+  };
+  const setPortPlacement = (playerId: string | null) => { portPlacementPlayer = playerId; updatePortHighlights(currentState); };
   const selectCity = (cityId: string | null) => { selectedCity = cityId; updateTerritory(currentState, cityId); resourceLayer.select(currentState, cityId, selectedResource); };
   const update = (state: GameState, selectedUnitId: string | null) => {
     shadowDirty = true;
     if (import.meta.env.DEV) profile.updates++;
     currentState = state;
+    if (hoveredKey) {
+      const [x, y] = hoveredKey.split(",").map(Number);
+      onHover(getTile(state, x, y) ?? null);
+    }
     updateTerritory(state, selectedCity);
+    updateRoads(state);
+    updatePorts(state);
+    updatePortHighlights(state);
     resourceLayer.update(state);
     resourceLayer.select(state, selectedCity, selectedResource);
     selected = selectedUnitId;
@@ -583,18 +694,46 @@ export function createWorld(
       const roof = index < 0 ? neutral : accents[index];
       const plaza = box("city plaza", 0.88, 0.06, 0.88, snow, node);
       plaza.position.y = 0.03;
-      for (let i = 0; i < city.townHallLevel; i++) {
-        const x = -0.27 + i * 0.25;
-        const height = 0.28 + i * 0.13;
-        const house = box("city house", 0.21, height, 0.25, armor, node);
-        house.position.set(x, height / 2 + 0.06, 0.24);
-        const cap = cone("city roof", 0.17, 0.34, roof, node);
-        cap.position.set(x, height + 0.14, 0.24);
+      const level = city.townHallLevel;
+      const hallMaterial = level === 1 ? bark : armor;
+      const hallWidth = level === 1 ? 0.42 : 0.5;
+      const hallHeight = level === 1 ? 0.32 : level === 2 ? 0.5 : 0.62;
+      const hall = box("town center hall", hallWidth, hallHeight, 0.4, hallMaterial, node);
+      hall.position.set(0, 0.06 + hallHeight / 2, 0.2);
+      const hallRoof = solid(CreateCylinder("town center roof", { height: 0.24, diameterBottom: hallWidth * 1.65, diameterTop: 0, tessellation: 4 }, scene), roof, node);
+      hallRoof.rotation.y = Math.PI / 4;
+      hallRoof.scaling.z = 0.85;
+      hallRoof.position.set(0, hallHeight + 0.18, 0.2);
+      const doorway = box("town center entrance", 0.12, 0.22, 0.025, dark, node);
+      doorway.position.set(0, 0.17, -0.015);
+      for (const x of [-0.15, 0.15]) {
+        const window = box("town center window", 0.075, 0.09, 0.025, gold, node);
+        window.position.set(x, hallHeight * 0.65 + 0.06, -0.015);
       }
-      const pole = box("city flagpole", 0.025, 0.75, 0.025, bark, node);
-      pole.position.set(0.32, 0.4, -0.25);
-      const flag = box("city banner", 0.22, 0.16, 0.025, roof, node);
-      flag.position.set(0.23, 0.69, -0.25);
+      if (level === 1) {
+        for (const x of [-0.24, 0.24]) box("timber porch post", 0.035, 0.3, 0.035, bark, node).position.set(x, 0.21, -0.13);
+        box("timber porch roof", 0.54, 0.045, 0.19, roof, node).position.set(0, 0.38, -0.1);
+      } else if (level === 2) {
+        box("stone hall wing", 0.22, 0.3, 0.36, armor, node).position.set(-0.31, 0.21, 0.2);
+        box("stone wing roof", 0.27, 0.07, 0.4, roof, node).position.set(-0.31, 0.4, 0.2);
+        box("town bell tower", 0.17, 0.67, 0.2, armor, node).position.set(0.32, 0.395, 0.25);
+        box("bell tower opening", 0.11, 0.14, 0.025, dark, node).position.set(0.32, 0.61, 0.135);
+        cone("bell tower roof", 0.17, 0.29, roof, node).position.set(0.32, 0.81, 0.25);
+      } else {
+        for (const x of [-0.34, 0.34]) {
+          box("fortified town tower", 0.19, 0.77, 0.21, armor, node).position.set(x, 0.445, 0.24);
+          box("tower parapet", 0.24, 0.09, 0.26, roof, node).position.set(x, 0.875, 0.24);
+          for (const z of [0.14, 0.34]) box("tower battlement", 0.08, 0.09, 0.065, armor, node).position.set(x, 0.965, z);
+          box("tower window", 0.07, 0.17, 0.025, dark, node).position.set(x, 0.58, 0.12);
+        }
+        box("town center steps", 0.29, 0.08, 0.19, rock, node).position.set(0, 0.09, -0.13);
+        box("fortified rear wall", 0.8, 0.22, 0.055, armor, node).position.set(0, 0.17, 0.4);
+      }
+      const poleHeight = level === 3 ? 1.12 : 0.75;
+      const pole = box("town center flagpole", 0.025, poleHeight, 0.025, bark, node);
+      pole.position.set(0.32, 0.06 + poleHeight / 2, -0.25);
+      const flag = box("town center banner", 0.22, 0.16, 0.025, roof, node);
+      flag.position.set(0.23, poleHeight - 0.01, -0.25);
       for (const mesh of node.getChildMeshes()) {
         mesh.isPickable = true;
         mesh.metadata = {
@@ -606,6 +745,8 @@ export function createWorld(
       cityModels.set(city.id, { node, signature });
     }
     for (const unit of state.units) {
+      if (!warriors.has(unit.id)) createWarrior(unit, state.players.findIndex(player => player.id === unit.ownerId));
+      scene.getMeshByName(`raft-${unit.id}`)?.setEnabled(!!unit.embarked);
       const texture = healthLabels.get(unit.id);
       const health = `${unit.hp}/${unit.maxHp}`;
       if (texture && healthValues.get(unit.id) !== health) {
@@ -632,7 +773,7 @@ export function createWorld(
       for (const target of getAttackTargets(state, selected)) {
         const marker = box("legal attack", 0.91, 0.024, 0.91, attackMaterial);
         marker.position.copyFrom(
-          tilePoint(target).add(new Vector3(0, 0.02, 0)),
+          tilePoint(target, true).add(new Vector3(0, 0.02, 0)),
         );
         markers.push(marker);
         const ring = solid(
@@ -650,7 +791,7 @@ export function createWorld(
       }
       for (const tile of getReachableTiles(state, selected)) {
         const marker = box("legal move", 0.85, 0.018, 0.85, moveMaterial);
-        marker.position.copyFrom(tilePoint(tile).add(new Vector3(0, 0.015, 0)));
+        marker.position.copyFrom(tilePoint(tile, true).add(new Vector3(0, 0.015, 0)));
         markers.push(marker);
         const dot = solid(
           CreateCylinder(
@@ -672,7 +813,7 @@ export function createWorld(
       const warrior = warriors.get(unitId)!;
       animation = {
         unitId,
-        path: [warrior.position.clone(), ...path.map(tilePoint)],
+        path: [warrior.position.clone(), ...path.map(position => tilePoint(position, true))],
         started: performance.now(),
         done: resolve,
       };
@@ -733,7 +874,7 @@ export function createWorld(
     if (result.advance) await move(result.attackerId, [result.advance]);
     for (const unit of after.units) {
       const model = warriors.get(unit.id)!;
-      model.position.copyFrom(tilePoint(unit));
+      model.position.copyFrom(tilePoint(unit, true));
       model.rotation.z = 0;
     }
     combatAnimating = false;
@@ -741,7 +882,7 @@ export function createWorld(
   const project = (position: Position, height = 0.04) => {
     scene.updateTransformMatrix(true);
     const point = Vector3.Project(
-      tilePoint(position).add(new Vector3(0, height, 0)),
+      tilePoint(position, true).add(new Vector3(0, height, 0)),
       Matrix.Identity(),
       scene.getTransformMatrix(),
       camera.viewport.toGlobal(
@@ -799,6 +940,8 @@ export function createWorld(
   });
   return {
     selectCity,
+    setPortPlacement,
+    getPortMarkerCount: () => portMarkers.length,
     selectResource: (tile: Position | null) => { selectedResource = tile; resourceLayer.select(currentState, selectedCity, tile); },
     getResourceRenderStats: resourceLayer.stats,
     getTerritoryRenderStats: () => ({ builds: territoryBuilds, meshes: territoryMeshes.length, quads: territoryMeshes.reduce((sum, mesh) => sum + mesh.getTotalVertices() / 4, 0), selectedCityId: selectedCity }),

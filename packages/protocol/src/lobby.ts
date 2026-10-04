@@ -23,6 +23,7 @@ export type LobbyClientMessage =
   | { type: "JOIN_ROOM"; name: string; code: string }
   | { type: "LEAVE_ROOM" }
   | { type: "START_MATCH" }
+  | { type: "RESUME_MATCH"; code: string; token: string }
   | { type: "GAME_ACTION"; requestId: string; expectedRevision: number; action: GameIntent };
 export type GameIntent = GameAction extends infer A ? A extends GameAction ? Omit<A, "playerId"> : never : never;
 
@@ -34,6 +35,7 @@ export const LOBBY_ERRORS = [
   "MATCH_ERROR",
 ] as const;
 export type LobbyServerMessage =
+  | { type: "MATCH_SESSION"; code: string; token: string }
   | { type: "LOBBY_UPDATE"; playerId: string; room: LobbyRoom }
   | { type: "LEFT_ROOM" }
   | { type: "MATCH_STATE"; state: GameState; action: GameAction | null }
@@ -60,6 +62,7 @@ export function parseLobbyClientMessage(
   value: unknown,
 ): LobbyClientMessage | null {
   if (!record(value)) return null;
+  if (value.type === "RESUME_MATCH" && exact(value, ["type", "code", "token"]) && typeof value.code === "string" && ROOM_CODE_PATTERN.test(value.code) && typeof value.token === "string" && /^[a-f0-9-]{36}$/.test(value.token)) return value as LobbyClientMessage;
   if (value.type === "LEAVE_ROOM" && exact(value, ["type"]))
     return { type: "LEAVE_ROOM" };
   if (value.type === "START_MATCH" && exact(value, ["type"])) return { type: "START_MATCH" };
@@ -69,10 +72,13 @@ export function parseLobbyClientMessage(
     const position = (p: unknown) => record(p) && exact(p, ["x", "y"]) && Number.isSafeInteger(p.x) && Number.isSafeInteger(p.y);
     const id = (v: unknown) => typeof v === "string" && v.length > 0 && v.length <= 100;
     const valid = a.type === "END_TURN" ? exact(a, ["type"]) :
+      a.type === "UNLOCK_TECHNOLOGY" ? exact(a, ["type", "technologyId"]) && id(a.technologyId) :
+      a.type === "RECRUIT_UNIT" ? exact(a, ["type", "cityId", "unitType"]) && id(a.cityId) && id(a.unitType) :
+      (a.type === "BUILD_ROAD" || a.type === "BUILD_PORT") ? exact(a, ["type", "to"]) && position(a.to) :
       a.type === "move" ? exact(a, ["type", "unitId", "to"]) && id(a.unitId) && position(a.to) :
       a.type === "ATTACK_UNIT" ? exact(a, ["type", "unitId", "targetId"]) && id(a.unitId) && id(a.targetId) :
-      a.type === "GROW_POPULATION" || a.type === "UPGRADE_TOWN_HALL" ? exact(a, ["type", "cityId"]) && id(a.cityId) :
-      a.type === "ASSIGN_WORKER" || a.type === "UNASSIGN_WORKER" ? exact(a, ["type", "cityId", "tile"]) && id(a.cityId) && position(a.tile) : false;
+      a.type === "UPGRADE_TOWN_HALL" ? exact(a, ["type", "cityId"]) && id(a.cityId) :
+      false;
     return valid ? value as LobbyClientMessage : null;
   }
   if (typeof value.name !== "string") return null;
@@ -96,6 +102,7 @@ export function parseLobbyServerMessage(
   value: unknown,
 ): LobbyServerMessage | null {
   if (!record(value)) return null;
+  if (value.type === "MATCH_SESSION" && exact(value, ["type", "code", "token"]) && typeof value.code === "string" && ROOM_CODE_PATTERN.test(value.code) && typeof value.token === "string" && /^[a-f0-9-]{36}$/.test(value.token)) return value as LobbyServerMessage;
   if (value.type === "LEFT_ROOM" && exact(value, ["type"])) return { type: "LEFT_ROOM" };
   if (value.type === "MATCH_STATE" && record(value.state) && Number.isSafeInteger(value.state.revision) && Array.isArray(value.state.players) && Array.isArray(value.state.units) && Array.isArray(value.state.tiles) && Array.isArray(value.state.cities)) return value as LobbyServerMessage;
   if ((value.type === "ACTION_REJECTED" && typeof value.requestId === "string" || value.type === "MATCH_ENDED") && typeof value.message === "string") return value as LobbyServerMessage;

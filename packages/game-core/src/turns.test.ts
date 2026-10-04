@@ -44,8 +44,8 @@ describe("player turns", () => {
         unit.maxMovement,
       ]),
     ).toEqual([
-      ["player-1", 2, 2],
-      ["player-2", 0, 2],
+      ["player-1", 1, 1],
+      ["player-2", 0, 1],
     ]);
     expect(getReachableTiles(state, "warrior-2")).toEqual([]);
     expect(new Set(state.units.map((unit) => `${unit.x},${unit.y}`)).size).toBe(
@@ -58,12 +58,10 @@ describe("player turns", () => {
   it("lets the active owner move, consume points, and exhaust their allowance", () => {
     const initial = freeze(createGame());
     const moved = applyAction(initial, move());
-    expect(moved.units[0]).toMatchObject({ x: 5, y: 5, movement: 1 });
+    expect(moved.units[0]).toMatchObject({ x: 5, y: 5, movement: 0 });
     expect(moved.turnNumber).toBe(1);
     expect(moved.revision).toBe(1);
-    const exhausted = freeze(
-      applyAction(moved, move("player-1", "warrior-1", 6, 5)),
-    );
+    const exhausted = freeze(moved);
     const before = structuredClone(exhausted);
     expect(() => applyAction(exhausted, move())).toThrow("Unreachable");
     expect(exhausted).toEqual(before);
@@ -108,7 +106,7 @@ describe("player turns", () => {
     expect(next.activePlayerId).toBe("player-2");
     expect(next.turnNumber).toBe(2);
     expect(next.revision).toBe(2);
-    expect(next.units.map((unit) => unit.movement)).toEqual([1, 2, 3]);
+    expect(next.units.map((unit) => unit.movement)).toEqual([0, 1, 3]);
     expect(next.units[0]).toEqual(spent.units[0]);
     expect(spent).toEqual(before);
     expect(getReachableTiles(next, "warrior-1")).toEqual([]);
@@ -118,14 +116,14 @@ describe("player turns", () => {
     );
     const returned = endTurn(next);
     expect(returned.activePlayerId).toBe("player-1");
-    expect(returned.units.map((unit) => unit.movement)).toEqual([2, 2, 3]);
+    expect(returned.units.map((unit) => unit.movement)).toEqual([1, 1, 3]);
     expect(returned.units[0]).toMatchObject({ x: 5, y: 5 });
   });
 
   it("restores exhausted movement on the next owned turn and allows another move", () => {
     const state = applyAction(
       createGame(),
-      move("player-1", "warrior-1", 6, 5),
+      move("player-1", "warrior-1", 5, 5),
     );
     const second = endTurn(state);
     expect(second.units[0].movement).toBe(0);
@@ -133,10 +131,10 @@ describe("player turns", () => {
       second,
       move("player-2", "warrior-2", 7, 4),
     );
-    expect(movedSecond.units[1]).toMatchObject({ x: 7, y: 4, movement: 1 });
+    expect(movedSecond.units[1]).toMatchObject({ x: 7, y: 4, movement: 0 });
     const third = endTurn(movedSecond);
-    expect(third.units.map((unit) => unit.movement)).toEqual([2, 1]);
-    expect(applyAction(third, move()).units[0].movement).toBe(1);
+    expect(third.units.map((unit) => unit.movement)).toEqual([1, 0]);
+    expect(applyAction(third, move("player-1", "warrior-1", 6, 5)).units[0].movement).toBe(0);
   });
 
   it.each([1, 2, 3, 8])(
@@ -146,7 +144,8 @@ describe("player turns", () => {
       state.players = Array.from({ length: count }, (_, i) => ({
         id: `player-${i + 1}`,
         name: `Player ${i + 1}`,
-        resources: { gold: 0, food: 0, wood: 0, steel: 0 },
+        resources: { gold: 0 },
+        technologies: [],
       }));
       for (let i = 0; i < count * 3; i++) {
         expect(state.activePlayerId).toBe(state.players[i % count].id);

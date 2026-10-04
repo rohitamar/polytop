@@ -1,9 +1,8 @@
-import { economy, getCityPopulation, getProduction, getTerritory, applyAction, getReachableTiles, getWorkableTiles, getAttackTargets, type GameState } from "@reach/game-core";
+import { getTileTerritory, getTechnologyCost, economy, getPlayerPopulation, getProduction, canUnitEnterTerrain, getTile, movementCost, positionKey, getTerritory, applyAction, getReachableTiles, getAttackTargets, type GameState } from "@reach/game-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
   parseLobbyServerMessage,
-  ROOM_CODE_PATTERN,
   type LobbyServerMessage,
 } from "@reach/protocol";
 import { createLobbyServer } from "./server";
@@ -21,11 +20,13 @@ describe("lobby WebSocket server", () => {
 
   async function connect() {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/lobby`);
+    let session: Extract<LobbyServerMessage, { type: "MATCH_SESSION" }> | undefined;
     const queue: LobbyServerMessage[] = [];
     const waiters: ((message: LobbyServerMessage) => void)[] = [];
     socket.on("message", (data) => {
       const message = parseLobbyServerMessage(JSON.parse(data.toString()));
       if (!message) throw new Error("Invalid server response");
+      if (message.type === "MATCH_SESSION") { session = message; return; }
       const waiter = waiters.shift();
       if (waiter) waiter(message);
       else queue.push(message);
@@ -36,6 +37,7 @@ describe("lobby WebSocket server", () => {
     });
     return {
       socket,
+      session: () => session!,
       send: (message: unknown) => socket.send(JSON.stringify(message)),
       next: () =>
         queue.length
@@ -79,7 +81,7 @@ describe("lobby WebSocket server", () => {
   }
 
   async function act(clients: Awaited<ReturnType<typeof connect>>[], state: GameState, action: unknown, index = state.players.findIndex(player => player.id === state.activePlayerId)) {
-    clients[index].send({ type: "GAME_ACTION", requestId: "test", expectedRevision: state.revision, action });
+    clients[index].send({ type: "GAME_ACTION", requestId: `test-${state.revision}`, expectedRevision: state.revision, action });
     let next!: GameState;
     for (const client of [clients[index], ...clients.filter((_, i) => i !== index)]) {
       const response = await client.next();
@@ -107,23 +109,77 @@ describe("lobby WebSocket server", () => {
     expect((await act(second.clients, second.state, { type: "END_TURN" })).revision).toBe(1);
   });
 
-  it("synchronizes resource placement, development, unassignment and production for eight clients", async () => {
-    await server.close();
-    server = createLobbyServer({ seed: "fern-104" });
-    port = await server.listen(0);
-    let { clients, state } = await match(8);
-    const placement = structuredClone(state.tiles);
-    const tile = getWorkableTiles(state, "city-1")[0];
-    const yieldRule = economy.yields[tile.resource!];
-    state = await act(clients, state, { type: "ASSIGN_WORKER", cityId: "city-1", tile: { x: tile.x, y: tile.y } });
-    expect(getCityPopulation(state, state.cities[0]).available).toBe(1);
-    expect(getProduction(state, state.players[0].id)[yieldRule.resource]).toBe(yieldRule.amount);
+  it("synchronizes automatic Gold and population for eight clients", async () => {
+    const { clients, state: initial } = await match(8);
+    let state = initial;
+    expect(getPlayerPopulation(state, state.players[0].id)).toEqual({ used: 1, capacity: 3, available: 2 });
+    const income = getProduction(state, state.players[0].id).gold;
+    expect(income).toBe(economy.goldIncome[0]);
     for (let i = 0; i < 8; i++) state = await act(clients, state, { type: "END_TURN" });
-    expect(state.players[0].resources[yieldRule.resource]).toBe(yieldRule.amount);
-    state = await act(clients, state, { type: "UNASSIGN_WORKER", cityId: "city-1", tile: { x: tile.x, y: tile.y } });
-    expect(getCityPopulation(state, state.cities[0]).available).toBe(2);
-    expect(getProduction(state, state.players[0].id)[yieldRule.resource]).toBe(0);
-    expect(state.tiles).toEqual(placement);
+    expect(state.players[0].resources).toEqual({ gold: initial.players[0].resources.gold + income });
+    expect(state.tiles).toEqual(initial.tiles);
+    expect(JSON.parse(JSON.stringify(state))).toEqual(state);
+  });
+
+  it("rejects simultaneous, stale and replayed turn requests without duplicate income", async () => {
+    const { clients, state: matchState } = await match();
+    let state = matchState;
+    const original = structuredClone(state);
+    const request = { type: "GAME_ACTION", requestId: "turn-once", expectedRevision: state.revision, action: { type: "END_TURN" } };
+    clients[0].send(request);
+    clients[0].send(request);
+    const response = await clients[0].next();
+    if (response.type !== "MATCH_STATE") throw new Error("Expected turn");
+    expect(await clients[1].next()).toEqual(response);
+    expect((await clients[0].next()).type).toBe("ACTION_REJECTED");
+    state = response.state;
+    expect(state).toEqual(applyAction(original, { type: "END_TURN", playerId: original.activePlayerId }));
+    clients[1].send({ ...request, requestId: "stale-turn" });
+    expect((await clients[1].next()).type).toBe("ACTION_REJECTED");
+    state = await act(clients, state, { type: "END_TURN" });
+    clients[0].send({ ...request, expectedRevision: state.revision });
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
+    const before = structuredClone(state);
+    state = await act(clients, state, { type: "END_TURN" });
+    expect(state).toEqual(applyAction(before, { type: "END_TURN", playerId: before.activePlayerId }));
+  });
+
+  it("authorizes technology purchases and synchronizes separate unlocks across clients", async () => {
+    const { clients, state: matchState } = await match();
+    let state = matchState;
+    const reject = async (index: number, action: unknown, reason: string, expectedRevision = state.revision) => {
+      clients[index].send({ type: "GAME_ACTION", requestId: "technology", expectedRevision, action });
+      expect(await clients[index].next()).toMatchObject({ type: "ACTION_REJECTED", message: expect.stringContaining(reason) });
+    };
+    await reject(1, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" }, "turn");
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "unknown" }, "Unknown technology");
+    for (const action of [
+      { type: "UNLOCK_TECHNOLOGY", technologyId: "archery", playerId: state.players[1].id },
+      { type: "UNLOCK_TECHNOLOGY", technologyId: "archery", goldCost: 0 },
+      { type: "UNLOCK_TECHNOLOGY", technologyId: "archery", technologies: ["archery"] },
+    ]) {
+      clients[0].send({ type: "GAME_ACTION", requestId: "spoof", expectedRevision: state.revision, action });
+      expect((await clients[0].next()).type).toBe("LOBBY_ERROR");
+    }
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    const goldBeforePurchase = state.players[0].resources.gold;
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "archery" });
+    expect(state.players[0].resources.gold).toBe(goldBeforePurchase - 6);
+    expect(state.players.map(player => player.technologies)).toEqual([["archery"], []]);
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "archery" }, "Already unlocked");
+    await reject(0, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" }, "State changed", state.revision - 1);
+    const to = getReachableTiles(state, "warrior-1")[0];
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: to.x, y: to.y } });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" });
+    expect(state.players.map(player => player.technologies)).toEqual([["archery"], ["roads"]]);
+    expect(state.players[1].resources.gold).toBe(getProduction(state, state.players[1].id).gold * 3 - 6);
+    state = await act(clients, state, { type: "END_TURN" });
+    expect(state.players.map(player => player.technologies)).toEqual([["archery"], ["roads"]]);
+    expect(state.units[0].movement).toBe(state.units[0].maxMovement);
   });
 
   it("requires a host and two players to start", async () => {
@@ -153,18 +209,15 @@ describe("lobby WebSocket server", () => {
     expect(state.units[0].ownerId).toBe(state.players[0].id);
   });
 
-  it("synchronizes movement, capture, workers, population, upgrades and turns", async () => {
-    let { clients, state } = await match();
+  it("synchronizes movement, capture, population capacity, upgrades and turns", async () => {
+    const { clients, state: matchState } = await match();
+    let state = matchState;
     const neutralTerritory = getTerritory(state).filter(tile => tile.cityId === "neutral-1");
     state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
     expect(getTerritory(state).filter(tile => tile.cityId === "neutral-1")).toEqual(neutralTerritory.map(tile => ({ ...tile, playerId: state.players[0].id })));
     expect(state.cities.find(city => city.id === "neutral-1")!.ownerId).toBe(state.players[0].id);
-    const tile = getWorkableTiles(state, "city-1").find(tile => tile.resource === "orchard" || tile.resource === "wheat")!;
-    state = await act(clients, state, { type: "ASSIGN_WORKER", cityId: "city-1", tile: { x: tile.x, y: tile.y } });
     for (let i = 0; i < 12; i++) state = await act(clients, state, { type: "END_TURN" });
-    state = await act(clients, state, { type: "GROW_POPULATION", cityId: "city-1" });
     state = await act(clients, state, { type: "UPGRADE_TOWN_HALL", cityId: "city-1" });
-    state = await act(clients, state, { type: "UNASSIGN_WORKER", cityId: "city-1", tile: { x: tile.x, y: tile.y } });
     expect(state.cities[0].townHallLevel).toBe(2);
     state = await act(clients, state, { type: "END_TURN" });
     expect(state.activePlayerId).toBe(state.players[1].id);
@@ -174,7 +227,8 @@ describe("lobby WebSocket server", () => {
   });
 
   it("rejects spoofing, invalid rules, malformed intents and stale revisions without changing state", async () => {
-    let { clients, state } = await match();
+    const { clients, state: matchState } = await match();
+    let state = matchState;
     const original = structuredClone(state);
     const cases = [
       [1, { type: "END_TURN" }],
@@ -183,7 +237,6 @@ describe("lobby WebSocket server", () => {
       [0, { type: "ATTACK_UNIT", unitId: "warrior-1", targetId: "warrior-2" }],
       [0, { type: "GROW_POPULATION", cityId: "city-1" }],
       [0, { type: "UPGRADE_TOWN_HALL", cityId: "city-2" }],
-      [0, { type: "UPGRADE_TOWN_HALL", cityId: "city-1" }],
       [0, { type: "ASSIGN_WORKER", cityId: "city-2", tile: { x: 7, y: 4 } }],
       [0, { type: "UNASSIGN_WORKER", cityId: "city-2", tile: { x: 7, y: 4 } }],
       [0, { type: "ATTACK_UNIT", unitId: "warrior-2", targetId: "warrior-1" }],
@@ -204,7 +257,11 @@ describe("lobby WebSocket server", () => {
   });
 
   it("broadcasts combat and deaths through the same rule boundary", async () => {
-    let { clients, state } = await match();
+    const { clients, state: matchState } = await match();
+    let state = matchState;
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
     state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 6, y: 5 } });
     state = await act(clients, state, { type: "END_TURN" });
     state = await act(clients, state, { type: "move", unitId: "warrior-2", to: { x: 7, y: 4 } });
@@ -219,6 +276,38 @@ describe("lobby WebSocket server", () => {
       state = await act(clients, state, { type: "END_TURN" });
     }
     expect(state.units).toHaveLength(1);
+  });
+
+  it("validates recruitment on the server and rejects simultaneous and replayed spending", async () => {
+    const { clients, state: matchState } = await match();
+    let state = matchState;
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
+    for (let i = 0; i < 4; i++) state = await act(clients, state, { type: "END_TURN" });
+    const before = structuredClone(state);
+    const action = { type: "RECRUIT_UNIT", cityId: "city-1", unitType: "warrior" } as const;
+    for (const [client, invalid] of [[clients[1], action], [clients[0], { ...action, unitType: "archer" }], [clients[0], { ...action, unitType: "swordsman" }], [clients[0], { ...action, unitType: "dragon" }], [clients[0], { ...action, cityId: "city-2" }], [clients[0], { ...action, playerId: state.players[1].id }]] as const) {
+      client.send({ type: "GAME_ACTION", requestId: "invalid-recruit", expectedRevision: state.revision, action: invalid });
+      expect(["ACTION_REJECTED", "LOBBY_ERROR"]).toContain((await client.next()).type);
+    }
+    clients[0].send({ type: "GAME_ACTION", requestId: "once", expectedRevision: state.revision, action });
+    clients[0].send({ type: "GAME_ACTION", requestId: "race", expectedRevision: state.revision, action });
+    const response = await clients[0].next();
+    if (response.type !== "MATCH_STATE") throw new Error("Expected recruitment");
+    state = response.state;
+    expect(state).toEqual(applyAction(before, { ...action, unitType: "warrior", playerId: before.activePlayerId }));
+    expect(await clients[1].next()).toEqual(response);
+    expect((await clients[0].next()).type).toBe("ACTION_REJECTED");
+    const id = state.units.at(-1)!.id;
+    expect(state.units.at(-1)).toMatchObject({ movement: 0, hasAttacked: true });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "move", unitId: id, to: { x: 3, y: 5 } });
+    clients[0].send({ type: "GAME_ACTION", requestId: "once", expectedRevision: state.revision, action });
+    const rejected = await clients[0].next();
+    expect(rejected).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
+    const unchanged = structuredClone(state);
+    state = await act(clients, state, { type: "END_TURN" });
+    expect(state).toEqual(applyAction(unchanged, { type: "END_TURN", playerId: unchanged.activePlayerId }));
   });
 
   it("rejects late joining and malformed JSON without replacing match state", async () => {
@@ -241,10 +330,220 @@ describe("lobby WebSocket server", () => {
     const next = await act(second.clients, second.state, { type: "END_TURN" });
     expect(next.revision).toBe(1);
     expect(getTerritory(next).filter(tile => tile.cityId === "neutral-1").every(tile => tile.playerId === null)).toBe(true);
-    await first.clients[0].close();
+    first.clients[0].send({ type: "LEAVE_ROOM" });
     expect((await first.clients[1].next()).type).toBe("MATCH_ENDED");
     const newcomer = await connect();
     newcomer.send({ type: "JOIN_ROOM", name: "Late", code: first.code });
     expect((await newcomer.next()).type).toBe("LOBBY_ERROR");
   });
+  it("collects a resource for all clients once despite stale and duplicate movement requests", async () => {
+    const { clients, state: matchState } = await match();
+    let state = matchState;
+    const request = { type: "GAME_ACTION", requestId: "collect-once", expectedRevision: state.revision, action: { type: "move", unitId: "warrior-1", to: { x: 4, y: 3 } } };
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 4, y: 4 } });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    const before = structuredClone(state);
+    request.expectedRevision = state.revision;
+    clients[0].send(request);
+    clients[0].send(request);
+    const response = await clients[0].next();
+    if (response.type !== "MATCH_STATE") throw new Error("Expected collection");
+    expect(await clients[1].next()).toEqual(response);
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
+    expect(response.state.players[0].resources.gold).toBe(before.players[0].resources.gold + 2);
+    expect(response.state.players[1]).toEqual(before.players[1]);
+    expect(response.state.tiles.find(tile => tile.x === 4 && tile.y === 3)!.resource).toBeUndefined();
+    clients[0].send({ ...request, requestId: "stale-collection" });
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "State changed. Try again." });
+    state = await act(clients, response.state, { type: "END_TURN" });
+    expect(state).toEqual(applyAction(response.state, { type: "END_TURN", playerId: response.state.activePlayerId }));
+  });
+
+  it("resumes stored technologies, depleted resources and Gold without repaying income or allowing request replay", async () => {
+    const { clients, state: matchState, code } = await match();
+    let state = matchState;
+    const session = clients[0].session();
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 4, y: 4 } });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: 4, y: 3 } });
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "climbing" });
+    const saved = structuredClone(state);
+    await clients[0].close();
+    const impostor = await connect();
+    impostor.send({ type: "RESUME_MATCH", code, token: "00000000-0000-0000-0000-000000000000" });
+    expect((await impostor.next()).type).toBe("LOBBY_ERROR");
+    const resumed = await connect();
+    resumed.send({ type: "RESUME_MATCH", code, token: session.token });
+    expect((await clients[1].next()).type).toBe("LOBBY_UPDATE");
+    expect(await resumed.next()).toMatchObject({ type: "LOBBY_UPDATE", playerId: state.players[0].id });
+    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state: saved, action: null });
+    resumed.send({ type: "GAME_ACTION", requestId: "test-3", expectedRevision: saved.revision, action: { type: "move", unitId: "warrior-1", to: { x: 4, y: 3 } } });
+    expect(await resumed.next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
+    clients[0] = resumed;
+    state = await act(clients, state, { type: "END_TURN" });
+    expect(state).toEqual(applyAction(saved, { type: "END_TURN", playerId: saved.activePlayerId }));
+  });
+
+  it("authoritatively builds Ports and carries units through the same synchronized action boundary", async () => {
+    const { clients, state: matchState, code } = await match();
+    let state = matchState;
+    const distances = (target: { x: number; y: number }) => {
+      const unit = state.units.find(unit => unit.id === "warrior-1")!;
+      const result = new Map([[positionKey(target), 0]]);
+      const pending = [{ ...target, cost: 0 }];
+      while (pending.length) {
+        pending.sort((a, b) => a.cost - b.cost);
+        const current = pending.shift()!;
+        for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+          const tile = getTile(state, current.x + dx, current.y + dy);
+          if (!tile || !canUnitEnterTerrain(state, unit.ownerId, unit, tile.terrain) || state.units.some(other => other.id !== unit.id && positionKey(other) === positionKey(tile))) continue;
+          const cost = current.cost + movementCost[getTile(state, current.x, current.y)!.terrain];
+          if (cost >= (result.get(positionKey(tile)) ?? Infinity)) continue;
+          result.set(positionKey(tile), cost);
+          pending.push({ ...tile, cost });
+        }
+      }
+      return result;
+    };
+    const city = state.cities.filter(city => city.ownerId === null && state.tiles.some(tile => tile.terrain === "water" && Math.abs(tile.x - city.x) + Math.abs(tile.y - city.y) === 1)).sort((a, b) => (distances(a).get(positionKey(state.units[0])) ?? Infinity) - (distances(b).get(positionKey(state.units[0])) ?? Infinity))[0];
+    expect(city).toBeDefined();
+    for (let i = 0; i < 40 && state.cities.find(candidate => candidate.id === city.id)!.ownerId !== state.players[0].id; i++) {
+      const distance = distances(city);
+      const next = getReachableTiles(state, "warrior-1").sort((a, b) => (distance.get(positionKey(a)) ?? Infinity) - (distance.get(positionKey(b)) ?? Infinity))[0];
+      if (next) state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: next.x, y: next.y } });
+      if (state.cities.find(candidate => candidate.id === city.id)!.ownerId === state.players[0].id) break;
+      state = await act(clients, state, { type: "END_TURN" });
+      state = await act(clients, state, { type: "END_TURN" });
+    }
+    expect(state.cities.find(candidate => candidate.id === city.id)!.ownerId).toBe(state.players[0].id);
+    const water = state.tiles.find(tile => tile.terrain === "water" && Math.abs(tile.x - city.x) + Math.abs(tile.y - city.y) === 1)!;
+    const action = { type: "BUILD_PORT", to: { x: water.x, y: water.y } } as const;
+    clients[0].send({ type: "GAME_ACTION", requestId: "locked-port", expectedRevision: state.revision, action });
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Requires Fishing" });
+    while (state.players[0].resources.gold < getTechnologyCost(state, state.players[0].id, "fishing") + 7) {
+      state = await act(clients, state, { type: "END_TURN" });
+      state = await act(clients, state, { type: "END_TURN" });
+    }
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "fishing" });
+    const before = structuredClone(state);
+    state = await act(clients, state, action);
+    expect(state.players[0].resources.gold).toBe(before.players[0].resources.gold - 7);
+    expect(getTile(state, water.x, water.y)?.port).toBe(true);
+    clients[0].send({ type: "GAME_ACTION", requestId: `test-${before.revision}`, expectedRevision: state.revision, action });
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "move", unitId: "warrior-1", to: { x: water.x, y: water.y } });
+    const sailor = state.units[0];
+    expect(sailor).toMatchObject({ unitType: "warrior", embarked: true, movement: 0, hasAttacked: true });
+    expect(getPlayerPopulation(state, state.players[0].id).used).toBe(1);
+    state = await act(clients, state, { type: "END_TURN" });
+    state = await act(clients, state, { type: "END_TURN" });
+    const waterDistances = (target: { x: number; y: number }) => {
+      const result = new Map([[positionKey(target), 0]]);
+      const pending = [target];
+      while (pending.length) {
+        const current = pending.shift()!;
+        for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+          const tile = getTile(state, current.x + dx, current.y + dy);
+          if (!tile || tile.terrain !== "water" || result.has(positionKey(tile)) || state.units.some(unit => unit.id !== sailor.id && positionKey(unit) === positionKey(tile))) continue;
+          result.set(positionKey(tile), result.get(positionKey(current))! + 1);
+          pending.push(tile);
+        }
+      }
+      return result;
+    };
+    const fish = state.tiles.find(tile => tile.resource === "fishery" && waterDistances(tile).has(positionKey(state.units.find(unit => unit.id === sailor.id)!)))!;
+    expect(fish).toBeDefined();
+    for (let i = 0; i < 50; i++) {
+      const distances = waterDistances(fish);
+      const destination = getReachableTiles(state, sailor.id).sort((a, b) => (distances.get(positionKey(a)) ?? Infinity) - (distances.get(positionKey(b)) ?? Infinity))[0];
+      if (!destination) {
+        state = await act(clients, state, { type: "END_TURN" });
+        state = await act(clients, state, { type: "END_TURN" });
+        continue;
+      }
+      if (positionKey(destination) !== positionKey(fish)) {
+        state = await act(clients, state, { type: "move", unitId: sailor.id, to: { x: destination.x, y: destination.y } });
+        continue;
+      }
+      const gold = state.players[0].resources.gold;
+      const request = { type: "GAME_ACTION", requestId: "fish-once", expectedRevision: state.revision, action: { type: "move", unitId: sailor.id, to: { x: fish.x, y: fish.y } } };
+      clients[0].send(request);
+      clients[0].send(request);
+      const response = await clients[0].next();
+      if (response.type !== "MATCH_STATE") throw new Error("Expected Fish collection");
+      expect(await clients[1].next()).toEqual(response);
+      expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
+      state = response.state;
+      expect(state.players[0].resources.gold).toBe(gold + 2);
+      expect(getTile(state, fish.x, fish.y)?.resource).toBeUndefined();
+      break;
+    }
+    expect(getTile(state, fish.x, fish.y)?.resource).toBeUndefined();
+    const token = clients[0].session().token;
+    await clients[0].close();
+    const resumed = await connect();
+    resumed.send({ type: "RESUME_MATCH", code, token });
+    expect((await clients[1].next()).type).toBe("LOBBY_UPDATE");
+    expect((await resumed.next()).type).toBe("LOBBY_UPDATE");
+    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state, action: null });
+  });
+
+  it("replaces a live session without changing state or permitting two controlling sockets", async () => {
+    const { clients, state, code } = await match();
+    const replacement = await connect();
+    replacement.send({ type: "RESUME_MATCH", code, token: clients[0].session().token });
+    expect((await clients[0].next()).type).toBe("MATCH_ENDED");
+    expect((await clients[1].next()).type).toBe("LOBBY_UPDATE");
+    expect((await replacement.next()).type).toBe("LOBBY_UPDATE");
+    expect(await replacement.next()).toEqual({ type: "MATCH_STATE", state, action: null });
+    clients[0] = replacement;
+    expect(await act(clients, state, { type: "END_TURN" })).toEqual(applyAction(state, { type: "END_TURN", playerId: state.activePlayerId }));
+  });
+
+  it("recalculates empire prices and broadcasts friendly and neutral roads once, including reconnect", async () => {
+    const { clients, state: initial, code } = await match();
+    let state = await act(clients, initial, { type: "move", unitId: "warrior-1", to: { x: 5, y: 5 } });
+    expect(getTechnologyCost(state, state.players[0].id, "roads")).toBe(8);
+    clients[0].send({ type: "GAME_ACTION", requestId: "locked-road", expectedRevision: state.revision, action: { type: "BUILD_ROAD", to: { x: 4, y: 4 } } });
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Requires Roads" });
+    while (state.players[0].resources.gold < 14) {
+      state = await act(clients, state, { type: "END_TURN" });
+      state = await act(clients, state, { type: "END_TURN" });
+    }
+    const gold = state.players[0].resources.gold;
+    state = await act(clients, state, { type: "UNLOCK_TECHNOLOGY", technologyId: "roads" });
+    expect(state.players[0].resources.gold).toBe(gold - 8);
+    state = await act(clients, state, { type: "BUILD_ROAD", to: { x: 4, y: 4 } });
+    expect(state.players[0].resources.gold).toBe(gold - 11);
+    const neutral = state.tiles.find(tile => tile.terrain === "grass" && !getTileTerritory(state, tile.x, tile.y)?.playerId && !state.cities.some(city => positionKey(city) === positionKey(tile)))!;
+    const request = { type: "GAME_ACTION", requestId: "road-once", expectedRevision: state.revision, action: { type: "BUILD_ROAD", to: { x: neutral.x, y: neutral.y } } };
+    clients[0].send(request);
+    clients[0].send(request);
+    clients[0].send({ ...request, requestId: "road-race" });
+    const response = await clients[0].next();
+    if (response.type !== "MATCH_STATE") throw new Error("Expected road");
+    expect(await clients[1].next()).toEqual(response);
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Request already accepted" });
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "State changed. Try again." });
+    state = response.state;
+    expect(state.players[0].resources.gold).toBe(gold - 14);
+    expect(getTile(state, neutral.x, neutral.y)?.road).toBe(true);
+    clients[0].send({ ...request, requestId: "road-existing", expectedRevision: state.revision });
+    expect(await clients[0].next()).toMatchObject({ type: "ACTION_REJECTED", message: "Already road-connected" });
+    const token = clients[0].session().token;
+    await clients[0].close();
+    const resumed = await connect();
+    resumed.send({ type: "RESUME_MATCH", code, token });
+    expect((await clients[1].next()).type).toBe("LOBBY_UPDATE");
+    expect((await resumed.next()).type).toBe("LOBBY_UPDATE");
+    expect(await resumed.next()).toEqual({ type: "MATCH_STATE", state, action: null });
+    clients[0] = resumed;
+    const next = await act(clients, state, { type: "END_TURN" });
+    expect(next).toEqual(applyAction(state, { type: "END_TURN", playerId: state.activePlayerId }));
+  });
+
 });

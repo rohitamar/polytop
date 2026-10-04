@@ -30,6 +30,7 @@ export interface GameDebug {
   isAnimating(): boolean;
   getVisualPosition(unitId?: string): Position & { elevation: number };
   getMarkerCount(): number;
+  getPortMarkerCount(): number;
   getHoveredTile(): string;
 }
 

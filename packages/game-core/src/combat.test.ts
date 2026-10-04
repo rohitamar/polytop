@@ -66,12 +66,12 @@ describe("warrior combat", () => {
   });
   it("allows moving then attacking even with no movement remaining", () => {
     const state = fixture();
-    state.units[1].x = 7;
+    state.units[1].x = 6;
     const moved = applyAction(state, {
       type: "move",
       playerId: "player-1",
       unitId: "warrior-1",
-      to: { x: 6, y: 5 },
+      to: { x: 5, y: 5 },
     });
     expect(moved.units[0].movement).toBe(0);
     expect(applyAction(moved, attack).units[0].hasAttacked).toBe(true);
@@ -147,7 +147,7 @@ describe("warrior combat", () => {
     expect(getAttackTargets(second, "warrior-1")).toEqual([]);
     const returned = end(second);
     expect(returned.units[0]).toMatchObject({
-      movement: 2,
+      movement: 1,
       hasAttacked: false,
       hp: 7,
     });

@@ -11,10 +11,11 @@ import {
   type LobbyServerMessage,
 } from "@reach/protocol";
 
-type Member = { socket: WebSocket; player: LobbyPlayer };
+type Member = { socket: WebSocket; player: LobbyPlayer; token: string; expiry?: ReturnType<typeof setTimeout>; acceptedRequests?: Set<string> };
 type Room = { code: string; members: Member[]; state?: GameState };
 
 export function createLobbyServer(options: { seed?: string; demo?: boolean } = {}) {
+  let closing = false;
   const rooms = new Map<string, Room>();
   const memberships = new Map<WebSocket, Room>();
   const http = createServer((_request, response) => {
@@ -44,11 +45,20 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
         room: snapshot,
       });
   };
-  const leave = (socket: WebSocket) => {
-    const room = memberships.get(socket);
-    if (!room) return;
+  const leave = (socket: WebSocket, intentional = false, room = memberships.get(socket)) => {
+    if (!room || closing) return;
     if (room.state) {
+      if (!intentional) {
+        memberships.delete(socket);
+        const member = room.members.find(member => member.socket === socket);
+        if (member) {
+          member.expiry = setTimeout(() => leave(socket, true, room), 60000);
+          member.expiry.unref();
+        }
+        return;
+      }
       for (const member of room.members) {
+        clearTimeout(member.expiry);
         memberships.delete(member.socket);
         send(member.socket, { type: "MATCH_ENDED", message: "A player disconnected. The match has ended." });
       }
@@ -85,8 +95,28 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
         });
         return;
       }
+      if (message.type === "RESUME_MATCH") {
+        const room = rooms.get(message.code);
+        const member = room?.members.find(member => member.token === message.token);
+        if (!room?.state || !member || memberships.has(socket)) {
+          send(socket, { type: "LOBBY_ERROR", code: "MATCH_ERROR", message: "Match session unavailable." });
+          return;
+        }
+        clearTimeout(member.expiry);
+        const previous = member.socket;
+        memberships.delete(previous);
+        member.socket = socket;
+        memberships.set(socket, room);
+        if (previous !== socket) {
+          send(previous, { type: "MATCH_ENDED", message: "This player session resumed in another connection." });
+          previous.close();
+        }
+        broadcast(room);
+        send(socket, { type: "MATCH_STATE", state: room.state, action: null });
+        return;
+      }
       if (message.type === "LEAVE_ROOM") {
-        leave(socket);
+        leave(socket, true);
         send(socket, { type: "LEFT_ROOM" });
         return;
       }
@@ -108,9 +138,12 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
             for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: room.state, action: null });
           } else {
             if (!room.state) throw new Error("Match has not started");
+            if (member.acceptedRequests?.has(message.requestId)) throw new Error("Request already accepted");
             if (message.expectedRevision !== room.state.revision) throw new Error("State changed. Try again.");
             const action = { ...message.action, playerId: member.player.id };
             room.state = applyAction(room.state, action);
+            member.acceptedRequests ??= new Set();
+            member.acceptedRequests.add(message.requestId);
             for (const participant of room.members) send(participant.socket, { type: "MATCH_STATE", state: room.state, action });
           }
         } catch (error) {
@@ -169,9 +202,11 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
       )!;
       room.members.push({
         socket,
+        token: randomUUID(),
         player: { id: randomUUID(), name: message.name, color },
       });
       memberships.set(socket, room);
+      send(socket, { type: "MATCH_SESSION", code: room.code, token: room.members.at(-1)!.token });
       broadcast(room);
     });
   });
@@ -193,7 +228,9 @@ export function createLobbyServer(options: { seed?: string; demo?: boolean } = {
       }),
     close: () =>
       new Promise<void>((resolve, reject) => {
+        closing = true;
         clearInterval(heartbeat);
+        for (const room of rooms.values()) for (const member of room.members) clearTimeout(member.expiry);
         for (const socket of websocket.clients) socket.terminate();
         websocket.close(() =>
           http.close((error) => (error ? reject(error) : resolve())),

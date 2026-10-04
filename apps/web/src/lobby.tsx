@@ -25,6 +25,7 @@ export function Lobby({ onMatch, onSession, onEnd }: {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const client = useRef<ReturnType<typeof connectLobby> | null>(null);
+  const reconnectTimer = useRef<number | undefined>(undefined);
   const requestTimer = useRef<number | undefined>(undefined);
   const finish = () => {
     window.clearTimeout(requestTimer.current);
@@ -33,6 +34,7 @@ export function Lobby({ onMatch, onSession, onEnd }: {
   };
   useEffect(
     () => () => {
+      window.clearTimeout(reconnectTimer.current);
       window.clearTimeout(requestTimer.current);
       client.current?.dispose();
     },
@@ -48,6 +50,7 @@ export function Lobby({ onMatch, onSession, onEnd }: {
         client.current = connectLobby(
           (response) => {
             finish();
+            if (response.type === "MATCH_SESSION") sessionStorage.setItem("polytop-session", JSON.stringify({ code: response.code, token: response.token }));
             if (response.type === "LOBBY_UPDATE") {
               setRoom(response.room);
               setPlayerColors(response.room.players);
@@ -61,11 +64,13 @@ export function Lobby({ onMatch, onSession, onEnd }: {
             }
             if (response.type === "ACTION_REJECTED") callbacks.current.onEnd(response.message);
             if (response.type === "MATCH_ENDED") {
+              sessionStorage.removeItem("polytop-session");
               setInMatch(false);
               setRoom(null);
               callbacks.current.onEnd(response.message, true);
             }
             if (response.type === "LEFT_ROOM") {
+              sessionStorage.removeItem("polytop-session");
               setRoom(null);
               setPlayerId("");
             }
@@ -80,6 +85,11 @@ export function Lobby({ onMatch, onSession, onEnd }: {
             callbacks.current.onEnd(reason, true);
             client.current?.dispose();
             client.current = null;
+            const saved = sessionStorage.getItem("polytop-session");
+            if (saved) {
+              const session = JSON.parse(saved) as { code: string; token: string };
+              reconnectTimer.current = window.setTimeout(() => void request({ type: "RESUME_MATCH", ...session }), 1000);
+            }
           },
         );
       }
@@ -102,6 +112,11 @@ export function Lobby({ onMatch, onSession, onEnd }: {
       );
     }
   };
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem("polytop-session");
+    if (saved) void request({ type: "RESUME_MATCH", ...JSON.parse(saved) });
+  }, []);
 
   return (
     <div className="lobby-shell">

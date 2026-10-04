@@ -14,14 +14,17 @@
     "test": "vitest run --configLoader runner",
     "test:e2e": "playwright test",
     "dev:server": "npm run dev -w @reach/server",
-    "dev:web": "npm run dev -w @reach/web -- --host 127.0.0.1"
+    "dev:web": "npm run dev -w @reach/web -- --host 127.0.0.1",
+    "lint": "eslint apps packages tests"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "eslint": "^10.12.0",
     "typescript": "^5.9.0",
+    "typescript-eslint": "^8.71.0",
     "vitest": "^4.1.11"
   }
 }
